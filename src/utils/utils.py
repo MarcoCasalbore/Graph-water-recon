@@ -1,25 +1,68 @@
 import pandas as pd
 import torch
 
-from tsl.data import SpatioTemporalDataset, TemporalSplitter, SpatioTemporalDataModule
-from tsl.data.preprocessing import MinMaxScaler
-from tsl.datasets import MetrLA, Elergone
+try:
+    from tsl.data import SpatioTemporalDataset, TemporalSplitter, SpatioTemporalDataModule
+    from tsl.data.preprocessing import MinMaxScaler
+    from tsl.datasets import MetrLA, Elergone
+except Exception:
+    SpatioTemporalDataset = None
+    TemporalSplitter = None
+    SpatioTemporalDataModule = None
+    MinMaxScaler = None
+    MetrLA = None
+    Elergone = None
 
-from src.dataset.dataset import MyDataModule
-from src.dataset.dataset_Solar import SolarCustom
+try:
+    from src.dataset.dataset import MyDataModule
+except Exception:
+    MyDataModule = None
+
+try:
+    from src.dataset.dataset_Solar import SolarCustom
+except Exception:
+    SolarCustom = None
 from src.model.dgm import DGMModel
-from src.train import train_and_test_baseline, BaselineModelPV
 from src.train_dgm import train_and_test_dgm
+from src.dataset.dataset_epanet import EpanetDataModule
 
+WATER_LIKE_DATASETS = {"ctown_epanet", "synthetic_water"}
+
+try:
+    from src.train import train_and_test_baseline, BaselineModelPV
+except Exception:
+    train_and_test_baseline = None
+    BaselineModelPV = None
 
 def get_model(run_params):
     if 'dgm' in run_params.model:
         model = DGMModel(run_params)
     elif run_params.model in ['gcn', 'gat', 'mlp', 'gcn1d', 'gcn1d-big', 'gConvLSTM', 'gConvGRU', 'DCRNN', 'GraphWavenet', 'AGCRNModel']:
+        if BaselineModelPV is None:
+            raise ImportError("Baseline dependencies are not available in this environment.")
         model = BaselineModelPV(run_params)
     else:
         raise Exception('Error in select the model!')
     return model
+
+
+# def set_params_wrt_dataset(run_params, train_loader):
+#     # Configure input feature size
+#     if run_params.pre_fc is None or len(run_params.pre_fc) == 0:
+#         if len(run_params.dgm_layers[0]) > 0:
+#             run_params.dgm_layers[0][0] = train_loader.dataset.n_features
+#         run_params.conv_layers[0][0] = train_loader.dataset.n_features
+#     else:
+#         if run_params.dataset_name in ['PV', 'wind']:
+#             run_params.pre_fc[0] = train_loader.dataset.dataset.n_features
+#         elif run_params.dataset_name in ['METR-LA', 'solar', 'electricity']:
+#             run_params.pre_fc[0] = run_params.lags
+#         else:
+#             raise ValueError('Define dataset name correctly!')
+
+#     run_params.fc_layers[-1] = run_params.prediction_window
+#     run_params.node_features = run_params.lags
+#     return run_params
 
 
 def set_params_wrt_dataset(run_params, train_loader):
@@ -33,12 +76,21 @@ def set_params_wrt_dataset(run_params, train_loader):
             run_params.pre_fc[0] = train_loader.dataset.dataset.n_features
         elif run_params.dataset_name in ['METR-LA', 'solar', 'electricity']:
             run_params.pre_fc[0] = run_params.lags
+        elif run_params.dataset_name in WATER_LIKE_DATASETS:
+            run_params.pre_fc[0] = run_params.lags * run_params.input_features
         else:
             raise ValueError('Define dataset name correctly!')
 
-    run_params.fc_layers[-1] = run_params.prediction_window
-    run_params.node_features = run_params.lags
+    if run_params.dataset_name in WATER_LIKE_DATASETS:
+        run_params.fc_layers[-1] = run_params.prediction_window * run_params.output_features
+        run_params.node_features = run_params.lags * run_params.input_features
+        run_params.num_nodes = train_loader.dataset.num_nodes
+    else:
+        run_params.fc_layers[-1] = run_params.prediction_window
+        run_params.node_features = run_params.lags
+
     return run_params
+
 
 
 def make_dgm_network_parameters(emb_dim):
@@ -220,6 +272,75 @@ def get_datamodule_old(run_params):
     return data_module_instance, run_params
 
 
+# def get_datamodule(run_params):
+#     # TSL-datasets style
+#     if run_params.dataset_name in ['METR-LA', 'electricity', 'solar']:
+#         if run_params.dataset_name == 'METR-LA':
+#             dataset = MetrLA(root='../data')
+#         elif run_params.dataset_name == 'electricity':
+#             dataset = Elergone(root='../data')
+#         elif run_params.dataset_name == 'solar':
+#             solar_dataframe = pd.read_csv('../data/df_solar.csv')
+#             solar_dataframe = solar_dataframe.drop('Unnamed: 0', axis=1)
+#             dataset = SolarCustom(solar_dataframe=solar_dataframe)
+#         else:
+#             raise ValueError(f'Dataset {run_params.dataset_name} not recognized')
+
+#         run_params.num_nodes = dataset.shape[1]
+#         connectivity = dataset.get_connectivity(threshold=0.1,
+#                                                 include_self=True,
+#                                                 normalize_axis=1,
+#                                                 layout="edge_index")
+#         df_dataset = dataset.dataframe()
+#         # Initialize MinMaxScaler
+#         scaler = MinMaxScaler()
+
+#         # Apply the scaler to the DataFrame
+#         df_dataset = pd.DataFrame(scaler.fit_transform(df_dataset), columns=df_dataset.columns)
+#         torch_dataset = SpatioTemporalDataset(target=df_dataset,
+#                                               connectivity=connectivity,  # edge_index
+#                                               horizon=run_params.prediction_window,
+#                                               window=run_params.lags,
+#                                               stride=1)
+#         # Normalize data using mean and std computed over time and node dimensions
+
+#         splitter = TemporalSplitter(val_len=0.2, test_len=0.1)
+#         data_module_instance = SpatioTemporalDataModule(
+#             dataset=torch_dataset,
+#             # scalers=scalers,
+#             splitter=splitter,
+#             batch_size=run_params.batch_size,
+#             workers=2
+#         )
+
+#         data_module_instance.setup()
+
+#         train_loader = data_module_instance.train_dataloader()
+#         val_loader = data_module_instance.val_dataloader()
+#         test_loader = data_module_instance.test_dataloader()
+
+
+#     elif run_params.dataset_name in ['PV', 'wind']:
+#         if run_params.dataset_name == 'PV':
+#             run_params.dataset_path = '../../data/Generated_time_series_output_31_with_weigth_multivariate_and_time.json'
+#         elif run_params.dataset_name == 'wind':
+#             run_params.dataset_path = '../../data/wind_dataset.json'
+#         data_module_instance = MyDataModule(run_params)
+#         run_params.num_nodes = data_module_instance.num_station
+#         train_loader = data_module_instance.train_dataloader
+#         val_loader = data_module_instance.val_dataloader
+#         test_loader = data_module_instance.test_dataloader
+#     else:
+#         raise ValueError('Define dataset name correct!')
+
+#     # return data_module_instance, run_params
+#     return (train_loader,
+#             val_loader,
+#             test_loader,
+#             run_params)
+
+
+
 def get_datamodule(run_params):
     # TSL-datasets style
     if run_params.dataset_name in ['METR-LA', 'electricity', 'solar']:
@@ -235,27 +356,28 @@ def get_datamodule(run_params):
             raise ValueError(f'Dataset {run_params.dataset_name} not recognized')
 
         run_params.num_nodes = dataset.shape[1]
-        connectivity = dataset.get_connectivity(threshold=0.1,
-                                                include_self=True,
-                                                normalize_axis=1,
-                                                layout="edge_index")
+        connectivity = dataset.get_connectivity(
+            threshold=0.1,
+            include_self=True,
+            normalize_axis=1,
+            layout="edge_index"
+        )
         df_dataset = dataset.dataframe()
-        # Initialize MinMaxScaler
-        scaler = MinMaxScaler()
 
-        # Apply the scaler to the DataFrame
+        scaler = MinMaxScaler()
         df_dataset = pd.DataFrame(scaler.fit_transform(df_dataset), columns=df_dataset.columns)
-        torch_dataset = SpatioTemporalDataset(target=df_dataset,
-                                              connectivity=connectivity,  # edge_index
-                                              horizon=run_params.prediction_window,
-                                              window=run_params.lags,
-                                              stride=1)
-        # Normalize data using mean and std computed over time and node dimensions
+
+        torch_dataset = SpatioTemporalDataset(
+            target=df_dataset,
+            connectivity=connectivity,
+            horizon=run_params.prediction_window,
+            window=run_params.lags,
+            stride=1
+        )
 
         splitter = TemporalSplitter(val_len=0.2, test_len=0.1)
         data_module_instance = SpatioTemporalDataModule(
             dataset=torch_dataset,
-            # scalers=scalers,
             splitter=splitter,
             batch_size=run_params.batch_size,
             workers=2
@@ -267,25 +389,48 @@ def get_datamodule(run_params):
         val_loader = data_module_instance.val_dataloader()
         test_loader = data_module_instance.test_dataloader()
 
-
     elif run_params.dataset_name in ['PV', 'wind']:
         if run_params.dataset_name == 'PV':
             run_params.dataset_path = '../../data/Generated_time_series_output_31_with_weigth_multivariate_and_time.json'
         elif run_params.dataset_name == 'wind':
             run_params.dataset_path = '../../data/wind_dataset.json'
+
         data_module_instance = MyDataModule(run_params)
         run_params.num_nodes = data_module_instance.num_station
         train_loader = data_module_instance.train_dataloader
         val_loader = data_module_instance.val_dataloader
         test_loader = data_module_instance.test_dataloader
+
+    elif run_params.dataset_name in WATER_LIKE_DATASETS:
+        data_module_instance = EpanetDataModule(run_params)
+        run_params.num_nodes = data_module_instance.num_nodes
+        run_params.input_features = data_module_instance.n_features
+        run_params.output_features = data_module_instance.n_features
+
+        train_loader = data_module_instance.train_dataloader()
+        val_loader = data_module_instance.val_dataloader()
+        test_loader = data_module_instance.test_dataloader()
+
     else:
         raise ValueError('Define dataset name correct!')
 
-    # return data_module_instance, run_params
-    return (train_loader,
-            val_loader,
-            test_loader,
-            run_params)
+    return (
+        train_loader,
+        val_loader,
+        test_loader,
+        run_params
+    )
+
+
+
+
+
+
+
+
+
+
+
 
 def update_seed_metrics(model, res_test, val_results, test_results):
     best_val_mse, best_val_rmse, best_val_mae, best_val_mape = model.best_mse, model.best_rmse, model.best_mae, model.best_mape
@@ -352,4 +497,6 @@ def train_and_test(model, train_l, val_l, test_l, run_params):
     if 'dgm' in run_params.model:
         train_and_test_dgm(model, train_l, val_l, test_l, run_params)
     else:
+        if train_and_test_baseline is None:
+            raise ImportError("Baseline dependencies are not available in this environment.")
         train_and_test_baseline(model, train_l, val_l, test_l, run_params)

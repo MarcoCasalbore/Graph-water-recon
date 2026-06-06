@@ -6,15 +6,18 @@ class Parameters:
     # Trainer parameters
     accelerator = 'gpu'
     log_every_n_steps = 300
-    max_epochs = 100
+    max_epochs = 15  #100  
     enable_progress_bar = True
     check_val_every_n_epoch = 3
-    node_features = 23
-    time_series_step = 4
+    node_features = 48 #cambiato da 23
+    time_series_step = 1 #cambiato da 4
 
     # Datasets
-    dataset_name = 'METR-LA'  #  # ['PV', 'wind', 'METR-LA', 'Electricity', 'solar']
-    dataset_path = '../../data/PV/Generated_time_series_output_31_with_weigth_multivariate_and_time.json'
+    dataset_name = 'ctown_epanet'   # ['ctown_epanet', 'PV', 'wind', 'METR-LA', 'electricity', 'solar']
+    dataset_path = ''
+    data_npz = '/mnt/data/data.npz'
+    meta_json = '/mnt/data/meta.json'
+    stride = 1
     # fold = '0'
 
     # Model parameters
@@ -25,7 +28,7 @@ class Parameters:
     emb_dim = 64
     gfun = 'gcn'
     ffun = 'gcn'  # 'gcn', 'gat', None, 'mlp', 'knn'
-    k = 5
+    k = 1 #da 5, sarebbero i nodi visti dal dgm per fare i suoi conti
     pooling = 'add'
     distance = 'euclidean'
 
@@ -37,15 +40,27 @@ class Parameters:
     early_stop_callback_flag = False
 
     lags = 24
-    prediction_window = 24
-    batch_size = 128
-    num_nodes = 31
+    prediction_window = 1 #cambiato da 24
+    batch_size = 32 #cambiato da 128 32
+    num_nodes = 396 #cambiato da 31
     logging = False
     save_ckpts = False
     save_logs = True
     chkpt_dir = ''
     reproducible = True
     seed = 42
+
+#######################marco############################
+    input_features = 2
+    output_features = 2
+
+    lambda_geo = 0.0
+    lambda_smooth = 0.0
+    lambda_graph = 1.0
+
+    pressure_weight = 1.0
+    demand_weight = 1.0
+#######################marco############################
 
     def __init__(self, params=None):
         # Show parser args

@@ -23,8 +23,15 @@ water-like benchmarks:
 - `water_branch_n50_bridges`
 - `water_branch_n50_loopy`
 
-The latest final suite reaches topology F1 in the `0.79-0.93` range on these
-benchmarks. See [docs/FINAL_RESULTS.md](docs/FINAL_RESULTS.md).
+The current valid non-oracle pipeline reaches topology F1 around `0.74-0.80`
+when hyperparameters and checkpoints are selected only through observable
+validation quantities. See
+[docs/MINIMAL_LOSS_RESULTS.md](docs/MINIMAL_LOSS_RESULTS.md).
+
+Older diagnostic sweeps can reach higher F1, but those are documented as
+diagnostics only because the decoder setting was selected after looking at
+ground-truth metrics. They are useful for understanding whether the DGM soft
+scores contain topology signal, not as final admissible results.
 
 Important caveat: current DGM runs are optimized strongly toward topology, not
 pure forecasting. Deep non-graph baselines forecast better, which is useful
@@ -32,12 +39,18 @@ evidence for the next research step rather than a contradiction.
 
 ## Main Results
 
-| Benchmark | Best run | Topology F1 | Components |
+Current non-oracle results selected by:
+
+```text
+J_obs = alpha * MSE_val + (1 - alpha) * L_topology_val
+```
+
+| Benchmark | Selected run | Topology F1 | Components |
 | --- | --- | ---: | ---: |
-| simple water-like graph | `simple_a010_q2_mst_e80` | 0.9344 | 1 |
-| water-branch base | `water_base_a002_q2_mst_e80` | 0.8254 | 1 |
-| water-branch loopy | `water_loopy_a010_q2_mst_e80` | 0.8082 | 1 |
-| water-branch bridges | `water_bridges_a005_q3_mst_e80` | 0.8065 | 1 |
+| simple water-like graph | `simple_geo_global_dynamic_proxy_a0p40_q2_ck2_stab1p000_e25` | 0.8033 | 1 |
+| water-branch base | `water_base_geo_global_dynamic_proxy_a0p40_q2_ck2_stab5p000_e25` | 0.7937 | 1 |
+| water-branch loopy | `water_loopy_geo_global_dynamic_proxy_a0p40_q2_ck2_stab5p000_e25` | 0.7534 | 1 |
+| water-branch bridges | `water_bridges_geo_global_dynamic_proxy_a0p40_q2_ck2_stab1p000_e25` | 0.7419 | 1 |
 
 Example water-like reconstructions:
 
@@ -71,8 +84,9 @@ Example water-like reconstructions:
     └── utils/                # Factories and helper utilities
 ```
 
-Generated outputs and checkpoints are ignored by Git. The main generated result
-directory is `outputs/final_suite`.
+Generated outputs and checkpoints are ignored by Git. The main current result
+directories are `outputs/minimal_loss_grid_v2_observable` and
+`outputs/minimal_loss_grid_stability_ablation`.
 
 ## Setup
 
@@ -120,14 +134,15 @@ python scripts/experiments/run_train_synthetic.py \
   --k 2 \
   --static_top_edges 63 \
   --use_complementary_loss \
-  --alpha_forecast 0.05 \
+  --alpha_forecast 0.40 \
   --lambda_graph 0.0 \
-  --lambda_soft_geo 0.0 \
   --lambda_soft_pseudo_edge 1.0 \
+  --lambda_stability 1.0 \
   --pseudo_score_mode geo_global_dynamic_proxy \
   --pseudo_use_static_target \
   --pseudo_topk 2 \
   --pseudo_include_mst \
+  --select_best_by observable_val \
   --assign_candidate_mask \
   --candidate_mode q_dynamic \
   --candidate_k 2 \
@@ -176,14 +191,15 @@ python scripts/experiments/run_train_synthetic.py \
   --k 2 \
   --static_top_edges 63 \
   --use_complementary_loss \
-  --alpha_forecast 0.05 \
+  --alpha_forecast 0.40 \
   --lambda_graph 0.0 \
-  --lambda_soft_geo 0.0 \
   --lambda_soft_pseudo_edge 1.0 \
+  --lambda_stability 1.0 \
   --pseudo_score_mode geo_global_dynamic_proxy \
   --pseudo_use_static_target \
   --pseudo_topk 2 \
   --pseudo_include_mst \
+  --select_best_by observable_val \
   --assign_candidate_mask \
   --candidate_mode q_dynamic \
   --candidate_k 2 \
@@ -196,25 +212,64 @@ The effective loss is:
 
 ```text
 L = alpha * L_forecast + (1 - alpha) * L_topology
-L_topology = L_soft_pseudo_edge
+L_topology = lambda_Q * L_Q + lambda_stability * L_stability
+L_Q = mean_i -sum_j Q_ij log(P_ij + eps)
 ```
 
 where the pseudo-edge target `Q` is built from node coordinates and time series,
 not from ground-truth edges.
 
-## Run the Final Suite
+## Run the Current Minimal Grid
+
+```bash
+python scripts/experiments/run_minimal_loss_grid.py \
+  --out_root outputs/minimal_loss_grid_v2_observable \
+  --epochs 25 \
+  --batch_size 32 \
+  --datasets simple water_base water_bridges water_loopy \
+  --modes pressure_corr pressure_smooth geo_global_dynamic_proxy \
+  --alphas 0.05 0.20 0.40 \
+  --topks 2 \
+  --candidate_ks 2
+
+python scripts/experiments/run_minimal_loss_grid.py \
+  --out_root outputs/minimal_loss_grid_stability_ablation \
+  --epochs 25 \
+  --batch_size 32 \
+  --datasets simple water_base water_bridges water_loopy \
+  --modes geo_global_dynamic_proxy \
+  --alphas 0.05 0.20 0.40 \
+  --topks 2 \
+  --candidate_ks 2 \
+  --lambda_stabilities 0.0 1.0 5.0
+```
+
+Main generated files:
+
+```text
+outputs/minimal_loss_grid_v2_observable/grid_results.csv
+outputs/minimal_loss_grid_v2_observable/RESULTS.md
+outputs/minimal_loss_grid_stability_ablation/grid_results.csv
+outputs/minimal_loss_grid_stability_ablation/RESULTS.md
+```
+
+## Run the Historical Diagnostic Suite
 
 ```bash
 python scripts/experiments/run_water_benchmark_suite.py --epochs 80
 python scripts/experiments/collect_final_results.py --out_root outputs/final_suite
 ```
 
-This runs:
+This historical suite runs:
 
 - DGM grid over `alpha`, `Q top-k`, and candidate support;
 - diagnostic soft graph postprocess sweeps;
 - non-graph deep forecasting baselines (`global_gru`, `node_mlp`);
 - result collection into CSV/Markdown tables.
+
+Use this suite as a diagnostic/upper-bound analysis. The current admissible
+selection path is the minimal grid above, because it selects runs and
+checkpoints by observable validation loss rather than ground-truth F1.
 
 Main generated files:
 
@@ -267,10 +322,10 @@ stage.
 ## Research Notes
 
 - Ground-truth edges must not be used inside training losses or pseudo-targets.
-- Ground truth is allowed for evaluation, diagnostic sweeps, and final metrics.
+- Ground truth is allowed only for final metrics and clearly marked diagnostics.
 - Dynamic DGM graphs are aggregated into static learned topologies using
   consensus or mean soft probabilities.
-- The best current topology results come from soft probabilities plus a
-  length-aware static decoder.
-- The next important step is replacing the diagnostic GT-selected decoder sweep
-  with a validation rule that does not inspect ground-truth edges.
+- The current valid selector is `J_obs`, which combines validation forecast MSE
+  and validation topology loss without inspecting the true edges.
+- The next important step is improving the observable proxy for sparse bridge
+  edges without expanding the loss into many weak terms.

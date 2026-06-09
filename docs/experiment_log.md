@@ -39,6 +39,9 @@ explicitly marked as an oracle diagnostic.
 | 2026-06-05 | DGM distillation Q-dynamic k=2 + MST support | water_branch_n50_bridges | best diagnostic F1 0.7903 | yes | Harder bridge-heavy case; just below 0.80 but still much better than ER/SBM. |
 | 2026-06-05 | DGM distillation Q-dynamic k=2 + MST support | water_branch_n50_loopy | best diagnostic F1 0.8082 | yes | Loopy case reaches target range; same F1 is also available with a connected postprocess setting. |
 | 2026-06-05 | Final water benchmark suite, 4 DGM variants per dataset | simple + 3 water_branch datasets | best F1 0.9344; water-like F1 0.7903-0.8254 | yes | Final numerical/visual suite saved in outputs/final_suite; docs/FINAL_RESULTS.md summarizes key results. |
+| 2026-06-09 | Minimal observable-loss grid | simple + 3 water_branch datasets | non-oracle selected F1: simple 0.7869, base 0.7619, bridges 0.7419, loopy 0.7123 | superseded | Selection uses `J_obs = alpha*MSE_val + (1-alpha)*L_topology_val`; GT only for final metrics. |
+| 2026-06-09 | Minimal observable-loss grid with stability ablation | simple + 3 water_branch datasets | non-oracle selected F1: simple 0.8033, base 0.7937, bridges 0.7419, loopy 0.7534 | yes | Current clean result. Loss is `forecast + Q` with optional stability; best proxy is `geo_global_dynamic_proxy`. |
+| 2026-06-09 | C-Town full-network first run | C-Town 396 nodes | clean fixed soft graph F1 0.5653; diagnostic sweep F1 0.5811 | yes | Full-network run uses pressure-correlation Q and geometric fallback input graph; diagnostic sweep is not a valid selector. |
 
 ## Cleanup
 
@@ -48,3 +51,4 @@ explicitly marked as an oracle diagnostic.
 | 2026-06-05 | Kept only readable current benchmark outputs | outputs about 40M | Added SBM/geo-SBM current runs and postprocess sweeps; no obsolete failed directories left. |
 | 2026-06-05 | Removed outdated ER/SBM output directories | outputs about 32M | Kept datasets and log entries, but removed low-value run artifacts after switching to water-like benchmarks. |
 | 2026-06-05 | Final cleanup for GitHub preparation | outputs about 49M, only final_suite kept | Removed old run folders/checkpoints and ER/SBM generated datasets; generated outputs remain gitignored. |
+| 2026-06-09 | Removed superseded minimal grid outputs | kept `minimal_loss_grid_v2_observable`, `minimal_loss_grid_stability_ablation`, C-Town, and historical `final_suite` | Old `minimal_loss_grid` and `minimal_loss_grid_deep` were replaced by observable-checkpoint runs. |

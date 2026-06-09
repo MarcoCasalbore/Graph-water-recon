@@ -1,12 +1,21 @@
-# Final Water-Like Benchmark Results
+# Historical Diagnostic Water-Like Benchmark Results
 
-These results come from the final suite in `outputs/final_suite`.
-Ground-truth edges are used only for evaluation and for the diagnostic decoder
-sweep, never inside DGM training.
+These results come from the older diagnostic suite in `outputs/final_suite`.
+They are kept because they show that DGM soft scores can contain strong topology
+signal. They should not be treated as the main admissible benchmark results
+when decoder settings are chosen from ground-truth F1.
+
+For the current non-oracle pipeline, where both hyperparameters and checkpoints
+are selected through observable validation quantities, see
+[MINIMAL_LOSS_RESULTS.md](MINIMAL_LOSS_RESULTS.md).
+
+Ground-truth edges are never used inside DGM training. In this historical suite,
+some static decoder sweeps are diagnostic because the best decoder setting was
+selected after looking at reconstruction metrics.
 
 ## Topology Reconstruction
 
-| Benchmark/run | Best F1 | Precision | Recall | Components | Notes |
+| Benchmark/run | Diagnostic best F1 | Precision | Recall | Components | Notes |
 | --- | ---: | ---: | ---: | ---: | --- |
 | `simple_a010_q2_mst_e80` | 0.9344 | 0.9344 | 0.9344 | 1 | Best overall controlled case. |
 | `water_base_a002_q2_mst_e80` | 0.8254 | 0.8254 | 0.8254 | 1 | Water-branch base benchmark. |
@@ -17,8 +26,9 @@ sweep, never inside DGM training.
 
 The best decoder configuration is usually a length-penalized soft-score graph
 with very small `tau` and, for branch-like cases, MST support. This confirms
-that the DGM soft probabilities contain useful topology information, but the
-static decoder still matters.
+that the DGM soft probabilities contain useful topology information, but these
+numbers include diagnostic decoder selection and are therefore not the clean
+non-oracle claim.
 
 Representative visual comparisons:
 
@@ -55,7 +65,7 @@ signal proxies, can expose a useful latent topology. A future stage should
 jointly tune forecast quality and topology without losing the reconstructed
 edge signal.
 
-## Reproduce
+## Reproduce Diagnostic Suite
 
 ```bash
 python scripts/experiments/run_water_benchmark_suite.py --epochs 80

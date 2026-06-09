@@ -104,7 +104,16 @@ def lag_corr_score(x: np.ndarray, max_lag: int = 4, absolute: bool = False) -> n
 
 
 def smooth_similarity(x: np.ndarray) -> np.ndarray:
-    diff = np.mean(np.abs(x[:, :, None] - x[:, None, :]), axis=0)
+    n = x.shape[1]
+    chunk_size = 32
+    diff = np.empty((n, n), dtype=np.float64)
+    x64 = x.astype(np.float64, copy=False)
+    for start in range(0, n, chunk_size):
+        stop = min(start + chunk_size, n)
+        diff[start:stop] = np.mean(
+            np.abs(x64[:, start:stop, None] - x64[:, None, :]),
+            axis=0,
+        )
     scale = np.median(diff[diff > 0]) if np.any(diff > 0) else 1.0
     score = np.exp(-diff / (scale + EPS))
     np.fill_diagonal(score, 0.0)

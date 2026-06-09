@@ -8,6 +8,28 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.data import Data
 
 
+def _geometry_knn_edge_index(node_xy: np.ndarray, k: int = 3) -> np.ndarray:
+    xy = np.asarray(node_xy, dtype=np.float64)
+    if xy.ndim == 3:
+        xy = xy[0]
+    xy = xy[:, :2]
+    n = xy.shape[0]
+    diff = xy[:, None, :] - xy[None, :, :]
+    dist = np.sqrt(np.sum(diff * diff, axis=-1))
+    np.fill_diagonal(dist, np.inf)
+    k = min(max(1, int(k)), n - 1)
+    idx = np.argpartition(dist, kth=k - 1, axis=1)[:, :k]
+    edges = set()
+    for i in range(n):
+        for j in idx[i]:
+            u, v = int(i), int(j)
+            if u == v:
+                continue
+            edges.add((u, v))
+            edges.add((v, u))
+    return np.asarray(sorted(edges), dtype=np.int64).T
+
+
 class EpanetWindowDataset(Dataset):
     """
     Builds windows from EPANET node time series.
@@ -50,7 +72,11 @@ class EpanetWindowDataset(Dataset):
         demand = npz["demand"].astype(np.float32)       # [T, N]
         node_xy = npz["node_xy"].astype(np.float32)     # [N, 2]
         edge_index_gt = npz["edge_index"].astype(np.int64) # [2, E]
-        edge_index = npz["initial_edge_index"].astype(np.int64) if "initial_edge_index" in npz.files else edge_index_gt
+        edge_index = (
+            npz["initial_edge_index"].astype(np.int64)
+            if "initial_edge_index" in npz.files
+            else _geometry_knn_edge_index(node_xy, k=3)
+        )
 
         x_all = np.stack([pressure, demand], axis=-1)   # [T, N, 2]
 

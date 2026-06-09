@@ -120,8 +120,26 @@ def _partial_corr_score(x: np.ndarray, ridge: float = 0.05) -> np.ndarray:
     return _minmax_offdiag(pcorr)
 
 
+def _positive_corr_score(x: np.ndarray) -> np.ndarray:
+    z = _standardize(x.astype(np.float64))
+    score = (z.T @ z) / max(1, z.shape[0] - 1)
+    score = np.maximum(score, 0.0)
+    np.fill_diagonal(score, 0.0)
+    return _minmax_offdiag(score)
+
+
 def _pressure_smooth_score(pressure: np.ndarray) -> np.ndarray:
-    diff = np.mean(np.abs(pressure[:, :, None] - pressure[:, None, :]), axis=0)
+    """Pressure smoothness score without allocating a full [T, N, N] tensor."""
+    n = pressure.shape[1]
+    chunk_size = 32
+    diff = np.empty((n, n), dtype=np.float64)
+    pressure64 = pressure.astype(np.float64, copy=False)
+    for start in range(0, n, chunk_size):
+        stop = min(start + chunk_size, n)
+        diff[start:stop] = np.mean(
+            np.abs(pressure64[:, start:stop, None] - pressure64[:, None, :]),
+            axis=0,
+        )
     scale = np.median(diff[diff > 0]) if np.any(diff > 0) else 1.0
     score = np.exp(-diff / (scale + 1e-12))
     np.fill_diagonal(score, 0.0)
@@ -173,7 +191,18 @@ def _global_dynamic_score(data_npz: str, mode: str, partial_ridge: float, geo_ta
     pressure = data["pressure"].astype(np.float32)
     demand = data["demand"].astype(np.float32)
 
+    if mode == "pressure_corr":
+        return _positive_corr_score(pressure)
+
     smooth = _pressure_smooth_score(pressure)
+    if mode == "pressure_smooth":
+        return smooth
+    if mode == "geo_pressure_smooth":
+        dist = np.sqrt(((xy[:, None, :] - xy[None, :, :]) ** 2).sum(axis=-1))
+        geo = np.exp(-dist / max(float(geo_tau), 1e-6))
+        np.fill_diagonal(geo, 0.0)
+        return _minmax_offdiag(geo * smooth)
+
     demand_global = _global_var_score(demand, ridge=partial_ridge)
     pressure_from_demand = _global_cross_var_score(demand, pressure, ridge=partial_ridge)
     dynamic = _minmax_offdiag(smooth * np.maximum(demand_global, pressure_from_demand))
@@ -309,6 +338,7 @@ def configure_run(args: argparse.Namespace) -> Parameters:
 
     params.num_nodes = args.num_nodes
     params.lags = args.lags
+    params.stride = args.stride
     params.prediction_window = 1
     params.batch_size = args.batch_size
     params.max_epochs = args.max_epochs
@@ -334,18 +364,7 @@ def configure_run(args: argparse.Namespace) -> Parameters:
     params.lambda_stability = args.lambda_stability
     params.use_complementary_loss = args.use_complementary_loss
     params.alpha_forecast = args.alpha_forecast
-    params.lambda_soft_geo = args.lambda_soft_geo
-    params.lambda_soft_degree = args.lambda_soft_degree
-    params.lambda_soft_entropy = args.lambda_soft_entropy
-    params.lambda_soft_connectivity = args.lambda_soft_connectivity
-    params.soft_connectivity_target = args.soft_connectivity_target
-    params.lambda_soft_temporal = args.lambda_soft_temporal
-    params.lambda_soft_triangle = args.lambda_soft_triangle
-    params.lambda_soft_mst = args.lambda_soft_mst
     params.lambda_soft_pseudo_edge = args.lambda_soft_pseudo_edge
-    params.lambda_soft_length_floor = args.lambda_soft_length_floor
-    params.soft_length_candidate_k = args.soft_length_candidate_k
-    params.soft_length_quantile = args.soft_length_quantile
     params.pseudo_geo_tau = args.pseudo_geo_tau
     params.pseudo_temporal_weight = args.pseudo_temporal_weight
     params.pseudo_score_mode = args.pseudo_score_mode
@@ -684,6 +703,7 @@ def main() -> None:
     parser.add_argument("--regenerate", action="store_true")
     parser.add_argument("--num_nodes", type=int, default=50)
     parser.add_argument("--lags", type=int, default=24)
+    parser.add_argument("--stride", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--max_epochs", type=int, default=20)
     parser.add_argument("--check_val_every_n_epoch", type=int, default=2)
@@ -693,18 +713,7 @@ def main() -> None:
     parser.add_argument("--lambda_stability", type=float, default=0.0)
     parser.add_argument("--use_complementary_loss", action="store_true")
     parser.add_argument("--alpha_forecast", type=float, default=1.0)
-    parser.add_argument("--lambda_soft_geo", type=float, default=1.0)
-    parser.add_argument("--lambda_soft_degree", type=float, default=0.0)
-    parser.add_argument("--lambda_soft_entropy", type=float, default=0.0)
-    parser.add_argument("--lambda_soft_connectivity", type=float, default=0.0)
-    parser.add_argument("--soft_connectivity_target", type=float, default=0.05)
-    parser.add_argument("--lambda_soft_temporal", type=float, default=0.0)
-    parser.add_argument("--lambda_soft_triangle", type=float, default=0.0)
-    parser.add_argument("--lambda_soft_mst", type=float, default=0.0)
     parser.add_argument("--lambda_soft_pseudo_edge", type=float, default=0.0)
-    parser.add_argument("--lambda_soft_length_floor", type=float, default=0.0)
-    parser.add_argument("--soft_length_candidate_k", type=int, default=12)
-    parser.add_argument("--soft_length_quantile", type=float, default=0.65)
     parser.add_argument("--pseudo_geo_tau", type=float, default=1.0)
     parser.add_argument("--pseudo_temporal_weight", type=float, default=0.5)
     parser.add_argument(
@@ -714,6 +723,7 @@ def main() -> None:
             "geo_only",
             "temporal_only",
             "demand_corr",
+            "pressure_corr",
             "pressure_smooth",
             "pressure_lag",
             "pressure_partial",
@@ -739,7 +749,7 @@ def main() -> None:
     parser.add_argument("--pseudo_topk", type=int, default=2)
     parser.add_argument("--pseudo_include_mst", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--pseudo_mst_bonus", type=float, default=1.0)
-    parser.add_argument("--select_best_by", choices=["val_mse", "topology_proxy"], default="val_mse")
+    parser.add_argument("--select_best_by", choices=["val_mse", "observable_val", "topology_proxy"], default="val_mse")
     parser.add_argument("--proxy_length_candidate_k", type=int, default=12)
     parser.add_argument("--proxy_length_quantile", type=float, default=0.65)
     parser.add_argument("--proxy_length_weight", type=float, default=1.0)
@@ -780,57 +790,30 @@ def main() -> None:
     print(f"export_dir        : {params.export_dir}")
     print(f"num_nodes         : {params.num_nodes}")
     print(f"lags              : {params.lags}")
+    print(f"stride            : {params.stride}")
     print(f"k                 : {params.k}")
     print(f"lambda_graph      : {params.lambda_graph}")
     print(f"lambda_stability  : {params.lambda_stability}")
     print(f"complementary_loss: {params.use_complementary_loss}")
     print(f"alpha_forecast    : {params.alpha_forecast}")
-    print(f"lambda_soft_geo   : {params.lambda_soft_geo}")
-    print(f"lambda_soft_degree: {params.lambda_soft_degree}")
-    print(f"lambda_soft_entropy: {params.lambda_soft_entropy}")
-    print(f"lambda_soft_connectivity: {params.lambda_soft_connectivity}")
-    print(f"soft_connectivity_target: {params.soft_connectivity_target}")
-    print(f"lambda_soft_temporal: {params.lambda_soft_temporal}")
-    print(f"lambda_soft_triangle: {params.lambda_soft_triangle}")
-    print(f"lambda_soft_mst: {params.lambda_soft_mst}")
     print(f"lambda_soft_pseudo_edge: {params.lambda_soft_pseudo_edge}")
-    print(f"lambda_soft_length_floor: {params.lambda_soft_length_floor}")
-    print(f"soft_length_floor: candidate_k={params.soft_length_candidate_k}, quantile={params.soft_length_quantile}, source=coordinates_only")
     print(f"pseudo_edge_target: mode={params.pseudo_score_mode}, static_target={params.pseudo_use_static_target}, geo_tau={params.pseudo_geo_tau}, temporal_weight={params.pseudo_temporal_weight}, candidate_k={params.pseudo_candidate_k}, topk={params.pseudo_topk}, include_mst={params.pseudo_include_mst}, max_lag={params.pseudo_max_lag}, partial_ridge={params.pseudo_partial_ridge}")
     print(f"select_best_by   : {params.select_best_by}")
-    print(f"topology_proxy   : length_q={params.proxy_length_quantile}, length_k={params.proxy_length_candidate_k}, w_len={params.proxy_length_weight}, w_conn={params.proxy_connectivity_weight}, w_freq={params.proxy_frequency_weight}")
     print(f"initial edge_index: geometry proxy from initial_edge_index")
     print("==========================================")
     print("LOSS FORMULA")
     if params.use_complementary_loss:
         print(
-            "  L = alpha * (L_forecast + lambda_graph * L_task_graph) "
-            "+ (1-alpha) * L_topology"
+            "  L = alpha * L_forecast + (1-alpha) * (lambda_Q * L_Q + lambda_stability * L_stability)"
         )
     else:
         print(
-            "  L = L_forecast + lambda_graph * L_task_graph + weighted auxiliary terms"
+            "  L = L_forecast + lambda_Q * L_Q + lambda_stability * L_stability"
         )
     print(
-        "  L_topology = "
-        "lambda_soft_geo * L_soft_geo "
-        "+ lambda_soft_degree * L_soft_degree "
-        "+ lambda_soft_connectivity * L_soft_connectivity "
-        "+ lambda_soft_temporal * L_soft_temporal "
-        "+ lambda_soft_triangle * L_soft_triangle "
-        "+ lambda_soft_mst * L_soft_mst "
-        "+ lambda_soft_pseudo_edge * L_soft_pseudo_edge "
-        "+ lambda_soft_length_floor * L_soft_length_floor "
-        "+ lambda_stability * L_stability "
-        "- lambda_soft_entropy * H_soft"
+        "  L_Q = mean_i -sum_j Q_ij log(P_ij + eps), "
+        "Q_ij built from coordinates + time series only, no GT edges"
     )
-    print(
-        "  L_soft_mst = mean_{(u,v) in MST(xy)} -log((P_uv + P_vu)/2 + eps)"
-    )
-    print(
-        "  L_soft_pseudo_edge = mean_i -sum_j Q_ij log(P_ij + eps), "
-            "Q_ij built from selected pseudo_score_mode using coordinates + time series, no GT edges"
-        )
     if params.pseudo_score_mode == "geo_partial_bridge":
         print(
             "  Q_bridge strategy: Q = (1-r_bridge) Q_local + r_bridge Q_bridge, "
@@ -850,17 +833,8 @@ def main() -> None:
             print("    Q score = geo_affinity * S_dynamic, then row top-k normalization.")
         else:
             print("    Q score = S_dynamic, then row top-k normalization.")
-    print(
-        "  L_soft_length_floor = relu(q_kNN(xy) - mean_i sum_j P_ij dist_xy(i,j))^2, "
-        "q_kNN(xy) from coordinates only, no GT edges"
-    )
-    print(
-        "  Model selection proxy = "
-        "w_len * relu(length_target - length_consensus)/length_target "
-        "+ w_conn * disconnected_components_penalty "
-        "- w_freq * consensus_frequency_cv; no GT edges"
-    )
-    print("  Change in this strategy: direct weak edge classification on observable pseudo-target Q.")
+    print("  Checkpoint selection can use J_obs = alpha*MSE_val + (1-alpha)*L_topology_val; no GT edges.")
+    print("  Change in this strategy: minimal direct weak edge classification on observable pseudo-target Q.")
     print("==========================================")
 
     first_batch = next(iter(train_l))

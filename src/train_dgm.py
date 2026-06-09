@@ -132,24 +132,17 @@ def _compute_dgm_stability_loss(model, device):
 
 def _compute_soft_topology_loss(model, batch, device, hparams, x_flat=None):
     """
-    Differentiable topology prior over the DGM neighbor distribution.
+    Minimal differentiable topology prior over the DGM neighbor distribution.
 
-    It uses each DGM layer's pre-topk logits, so gradients flow into the graph
-    embedding even though the final sampled/top-k edges are discrete.
+    Main research loss:
+        L_Q = - mean_i sum_j Q_ij log(P_ij + eps)
+
+    Q is built only from observed coordinates/time series. Ground-truth edges
+    are never used here.
     """
     if not hasattr(batch, "node_xy") or batch.node_xy is None:
         zero = torch.tensor(0.0, device=device)
-        return zero, {
-            "soft_geo": 0.0,
-            "soft_degree": 0.0,
-            "soft_entropy": 0.0,
-            "soft_connectivity": 0.0,
-            "soft_temporal": 0.0,
-            "soft_triangle": 0.0,
-            "soft_mst": 0.0,
-            "soft_pseudo_edge": 0.0,
-            "soft_length_floor": 0.0,
-        }
+        return zero, {"soft_pseudo_edge": 0.0}
 
     node_xy = batch.node_xy.to(device)
     if node_xy.dim() == 3:
@@ -158,59 +151,15 @@ def _compute_soft_topology_loss(model, batch, device, hparams, x_flat=None):
         node_xy = node_xy[: int(hparams.num_nodes)]
     else:
         zero = torch.tensor(0.0, device=device)
-        return zero, {
-            "soft_geo": 0.0,
-            "soft_degree": 0.0,
-            "soft_entropy": 0.0,
-            "soft_connectivity": 0.0,
-            "soft_temporal": 0.0,
-            "soft_triangle": 0.0,
-            "soft_mst": 0.0,
-            "soft_pseudo_edge": 0.0,
-            "soft_length_floor": 0.0,
-        }
+        return zero, {"soft_pseudo_edge": 0.0}
 
     dist = torch.cdist(node_xy, node_xy, p=2)
     dist = dist / (dist[torch.isfinite(dist)].mean().detach() + 1e-12)
     eye = torch.eye(dist.shape[0], device=device, dtype=torch.bool)
     dist = dist.masked_fill(eye, 0.0)
 
-    degree_target = float(getattr(hparams, "soft_degree_target", 1.0))
-    geo_weight = _get_float_attr(hparams, "lambda_soft_geo", 1.0)
-    degree_weight = _get_float_attr(hparams, "lambda_soft_degree", 0.0)
-    entropy_weight = _get_float_attr(hparams, "lambda_soft_entropy", 0.0)
-    connectivity_weight = _get_float_attr(hparams, "lambda_soft_connectivity", 0.0)
-    connectivity_target = _get_float_attr(hparams, "soft_connectivity_target", 0.05)
-    temporal_weight = _get_float_attr(hparams, "lambda_soft_temporal", 0.0)
-    triangle_weight = _get_float_attr(hparams, "lambda_soft_triangle", 0.0)
-    mst_weight = _get_float_attr(hparams, "lambda_soft_mst", 0.0)
-    pseudo_edge_weight = _get_float_attr(hparams, "lambda_soft_pseudo_edge", 0.0)
-    length_floor_weight = _get_float_attr(hparams, "lambda_soft_length_floor", 0.0)
-
-    temporal_dist = None
-    if temporal_weight > 0.0 and x_flat is not None:
-        N = int(hparams.num_nodes)
-        if x_flat.shape[0] % N == 0:
-            z = x_flat.detach().reshape(-1, N, x_flat.shape[-1])
-            z = F.normalize(z, p=2, dim=-1)
-            sim = torch.matmul(z, z.transpose(1, 2)).mean(dim=0)
-            affinity = 0.5 * (sim + 1.0)
-            affinity = affinity.clamp(0.0, 1.0).masked_fill(eye, 0.0)
-            temporal_dist = 1.0 - affinity
-
-    geo_terms = []
-    degree_terms = []
-    entropy_terms = []
-    connectivity_terms = []
-    temporal_terms = []
-    triangle_terms = []
-    mst_terms = []
+    pseudo_edge_weight = _get_float_attr(hparams, "lambda_soft_pseudo_edge", 1.0)
     pseudo_edge_terms = []
-    length_floor_terms = []
-
-    mst_edges = None
-    if mst_weight > 0.0:
-        mst_edges = _geometric_mst_edges(dist)
 
     pseudo_target = None
     if pseudo_edge_weight > 0.0:
@@ -220,10 +169,6 @@ def _compute_soft_topology_loss(model, batch, device, hparams, x_flat=None):
             hparams=hparams,
             device=device,
         )
-
-    length_floor = None
-    if length_floor_weight > 0.0:
-        length_floor = _geometry_only_length_floor(dist, hparams)
 
     for graph_layer in getattr(model, "graph_f", []):
         logits = getattr(graph_layer, "last_logits", None)
@@ -238,114 +183,18 @@ def _compute_soft_topology_loss(model, batch, device, hparams, x_flat=None):
         probs = torch.where(torch.isfinite(logits), probs, torch.zeros_like(probs))
         probs = probs / (probs.sum(dim=1, keepdim=True) + 1e-12)
 
-        geo_terms.append((probs * dist).sum(dim=1).mean())
-
-        in_degree = probs.sum(dim=0)
-        degree_terms.append(((in_degree - degree_target) ** 2).mean())
-
-        entropy = -(probs * torch.log(probs + 1e-12)).sum(dim=1).mean()
-        entropy_terms.append(entropy)
-
-        if connectivity_weight > 0.0:
-            adj = 0.5 * (probs + probs.t())
-            adj = adj.masked_fill(eye, 0.0)
-            deg = adj.sum(dim=1)
-            laplacian = torch.diag(deg) - adj
-            eigvals = torch.linalg.eigvalsh(laplacian)
-            lambda2 = eigvals[1] if eigvals.numel() > 1 else eigvals.new_tensor(0.0)
-            connectivity_terms.append(torch.relu(connectivity_target - lambda2).pow(2))
-
-        if temporal_dist is not None:
-            temporal_terms.append((probs * temporal_dist).sum(dim=1).mean())
-
-        if triangle_weight > 0.0:
-            adj = 0.5 * (probs + probs.t())
-            adj = adj.masked_fill(eye, 0.0)
-            triangle_density = torch.trace(adj @ adj @ adj) / (6.0 * adj.shape[0])
-            triangle_terms.append(triangle_density)
-
-        if mst_edges is not None and mst_edges.numel() > 0:
-            u = mst_edges[:, 0]
-            v = mst_edges[:, 1]
-            edge_prob = 0.5 * (probs[u, v] + probs[v, u])
-            mst_terms.append(-torch.log(edge_prob + 1e-12).mean())
-
         if pseudo_target is not None:
             pseudo_edge_terms.append(-(pseudo_target * torch.log(probs + 1e-12)).sum(dim=1).mean())
 
-        if length_floor is not None:
-            expected_length = (probs * dist).sum(dim=1).mean()
-            length_floor_terms.append(torch.relu(length_floor - expected_length).pow(2))
-
-    if not geo_terms:
+    if not pseudo_edge_terms:
         zero = torch.tensor(0.0, device=device)
-        return zero, {
-            "soft_geo": 0.0,
-            "soft_degree": 0.0,
-            "soft_entropy": 0.0,
-            "soft_connectivity": 0.0,
-            "soft_temporal": 0.0,
-            "soft_triangle": 0.0,
-            "soft_mst": 0.0,
-            "soft_pseudo_edge": 0.0,
-            "soft_length_floor": 0.0,
-        }
+        return zero, {"soft_pseudo_edge": 0.0}
 
-    soft_geo = torch.stack(geo_terms).mean()
-    soft_degree = torch.stack(degree_terms).mean()
-    soft_entropy = torch.stack(entropy_terms).mean()
-    soft_connectivity = (
-        torch.stack(connectivity_terms).mean()
-        if connectivity_terms
-        else torch.tensor(0.0, device=device)
-    )
-    soft_temporal = (
-        torch.stack(temporal_terms).mean()
-        if temporal_terms
-        else torch.tensor(0.0, device=device)
-    )
-    soft_triangle = (
-        torch.stack(triangle_terms).mean()
-        if triangle_terms
-        else torch.tensor(0.0, device=device)
-    )
-    soft_mst = (
-        torch.stack(mst_terms).mean()
-        if mst_terms
-        else torch.tensor(0.0, device=device)
-    )
-    soft_pseudo_edge = (
-        torch.stack(pseudo_edge_terms).mean()
-        if pseudo_edge_terms
-        else torch.tensor(0.0, device=device)
-    )
-    soft_length_floor = (
-        torch.stack(length_floor_terms).mean()
-        if length_floor_terms
-        else torch.tensor(0.0, device=device)
-    )
-    loss = (
-        geo_weight * soft_geo
-        + degree_weight * soft_degree
-        + connectivity_weight * soft_connectivity
-        + temporal_weight * soft_temporal
-        + triangle_weight * soft_triangle
-        + mst_weight * soft_mst
-        + pseudo_edge_weight * soft_pseudo_edge
-        + length_floor_weight * soft_length_floor
-        - entropy_weight * soft_entropy
-    )
+    soft_pseudo_edge = torch.stack(pseudo_edge_terms).mean()
+    loss = pseudo_edge_weight * soft_pseudo_edge
 
     return loss, {
-        "soft_geo": float(soft_geo.detach().item()),
-        "soft_degree": float(soft_degree.detach().item()),
-        "soft_entropy": float(soft_entropy.detach().item()),
-        "soft_connectivity": float(soft_connectivity.detach().item()),
-        "soft_temporal": float(soft_temporal.detach().item()),
-        "soft_triangle": float(soft_triangle.detach().item()),
-        "soft_mst": float(soft_mst.detach().item()),
         "soft_pseudo_edge": float(soft_pseudo_edge.detach().item()),
-        "soft_length_floor": float(soft_length_floor.detach().item()),
     }
 
 
@@ -575,6 +424,8 @@ def _build_static_pseudo_edge_target(dist, hparams, device):
         score = geo_affinity
     elif mode == "demand_corr" and demand is not None:
         score = _positive_corr_affinity(demand)
+    elif mode == "pressure_corr":
+        score = _positive_corr_affinity(pressure)
     elif mode in {"pressure_smooth", "geo_pressure_smooth"}:
         temporal = _pressure_smooth_affinity(pressure)
         score = temporal if mode == "pressure_smooth" else geo_affinity * temporal
@@ -650,6 +501,8 @@ def _build_temporal_affinity(x_flat, hparams, n, device, mode):
 
     if mode == "demand_corr":
         return _positive_corr_affinity(demand) if demand is not None else None
+    if mode == "pressure_corr":
+        return _positive_corr_affinity(pressure)
     if mode == "pressure_smooth":
         return _pressure_smooth_affinity(pressure)
     if mode == "pressure_lag":
@@ -715,7 +568,24 @@ def _positive_corr_affinity(x):
 
 
 def _pressure_smooth_affinity(pressure):
-    diff = torch.mean(torch.abs(pressure[:, :, None] - pressure[:, None, :]), dim=0)
+    """Pressure smoothness score computed without materializing [T, N, N].
+
+    Analytically this is unchanged:
+        S_ij = exp(- mean_t |p_i(t) - p_j(t)| / median_positive_diff)
+
+    The chunked implementation is needed for C-Town-size graphs, where the
+    naive [T, N, N] tensor can require several GB of memory.
+    """
+    n = pressure.shape[1]
+    chunk_size = 32
+    diff = pressure.new_empty((n, n))
+    for start in range(0, n, chunk_size):
+        stop = min(start + chunk_size, n)
+        block = torch.mean(
+            torch.abs(pressure[:, start:stop, None] - pressure[:, None, :]),
+            dim=0,
+        )
+        diff[start:stop] = block
     positive = diff[diff > 0]
     scale = torch.median(positive) if positive.numel() > 0 else diff.new_tensor(1.0)
     return _offdiag_minmax(torch.exp(-diff / (scale + 1e-12)))
@@ -1375,32 +1245,14 @@ def train_one_epoch(model, dataloader, optimizer, device, hparams):
 
     running_mse = 0.0
     running_graph_loss = 0.0
-    running_geo = 0.0
-    running_smooth = 0.0
-    running_knn = 0.0
     running_stability = 0.0
     running_topology = 0.0
-    running_soft_geo = 0.0
-    running_soft_degree = 0.0
-    running_soft_entropy = 0.0
-    running_soft_connectivity = 0.0
-    running_soft_temporal = 0.0
-    running_soft_triangle = 0.0
-    running_soft_mst = 0.0
     running_soft_pseudo_edge = 0.0
-    running_soft_length_floor = 0.0
-    running_inside_ratio = 0.0
-    running_degree_pen = 0.0
-    running_degree_max = 0.0
     running_pressure_mse = 0.0
     running_demand_mse = 0.0
     n_batches = 0
 
-    lam_geo = _get_float_attr(hparams, "lambda_geo", 0.0)
-    lam_smooth = _get_float_attr(hparams, "lambda_smooth", 0.0)
     lam_graph = _get_float_attr(hparams, "lambda_graph", 0.0)
-    lam_knn = _get_float_attr(hparams, "lambda_knn", 0.0)
-    lam_deg = _get_float_attr(hparams, "lambda_degree", 0.0)
     lam_stability = _get_float_attr(hparams, "lambda_stability", 0.0)
     alpha_forecast = _get_float_attr(hparams, "alpha_forecast", 1.0)
     use_complementary_loss = bool(getattr(hparams, "use_complementary_loss", False))
@@ -1434,17 +1286,6 @@ def train_one_epoch(model, dataloader, optimizer, device, hparams):
             loss_pressure = float(loss_forecasting.detach().item())
             loss_demand = 0.0
 
-        loss_geo, loss_smooth = _compute_geo_and_smooth_losses(
-            model, batch, y_predicted, device, hparams
-        )
-
-        loss_knn, inside_ratio = _compute_knn_candidate_loss(
-            model, batch, device, hparams
-        )
-
-        loss_degree, deg_max_batch = _compute_degree_penalty(
-            model, hparams, device
-        )
         loss_stability = _compute_dgm_stability_loss(model, device)
         loss_soft_topology, topology_debug = _compute_soft_topology_loss(
             model, batch, device, hparams, x_flat=x
@@ -1464,10 +1305,6 @@ def train_one_epoch(model, dataloader, optimizer, device, hparams):
 
         topology_loss = (
             loss_soft_topology
-            + lam_geo * loss_geo
-            + lam_smooth * loss_smooth
-            + lam_knn * loss_knn
-            + lam_deg * loss_degree
             + lam_stability * loss_stability
         )
 
@@ -1480,11 +1317,7 @@ def train_one_epoch(model, dataloader, optimizer, device, hparams):
         else:
             loss_total = (
                 loss_forecasting
-                + lam_geo * loss_geo
-                + lam_smooth * loss_smooth
                 + lam_graph * graph_loss
-                + lam_knn * loss_knn
-                + lam_deg * loss_degree
                 + lam_stability * loss_stability
             )
 
@@ -1497,23 +1330,9 @@ def train_one_epoch(model, dataloader, optimizer, device, hparams):
         running_pressure_mse += loss_pressure
         running_demand_mse += loss_demand
         running_graph_loss += graph_loss_value
-        running_geo += float(loss_geo.detach().item())
-        running_smooth += float(loss_smooth.detach().item())
-        running_knn += float(loss_knn.detach().item())
         running_stability += float(loss_stability.detach().item())
         running_topology += float(topology_loss.detach().item())
-        running_soft_geo += topology_debug["soft_geo"]
-        running_soft_degree += topology_debug["soft_degree"]
-        running_soft_entropy += topology_debug["soft_entropy"]
-        running_soft_connectivity += topology_debug["soft_connectivity"]
-        running_soft_temporal += topology_debug["soft_temporal"]
-        running_soft_triangle += topology_debug["soft_triangle"]
-        running_soft_mst += topology_debug["soft_mst"]
         running_soft_pseudo_edge += topology_debug["soft_pseudo_edge"]
-        running_soft_length_floor += topology_debug["soft_length_floor"]
-        running_inside_ratio += inside_ratio
-        running_degree_pen += float(loss_degree.detach().item())
-        running_degree_max += deg_max_batch
         n_batches += 1
 
         all_y_true.append(y.detach().cpu().numpy())
@@ -1527,23 +1346,9 @@ def train_one_epoch(model, dataloader, optimizer, device, hparams):
     train_mape = mean_absolute_percentage_error(all_y_pred, all_y_true)
     train_mse = running_mse / max(1, n_batches)
     avg_graph_loss = running_graph_loss / max(1, n_batches)
-    avg_geo = running_geo / max(1, n_batches)
-    avg_smooth = running_smooth / max(1, n_batches)
-    avg_knn = running_knn / max(1, n_batches)
     avg_stability = running_stability / max(1, n_batches)
     avg_topology = running_topology / max(1, n_batches)
-    avg_soft_geo = running_soft_geo / max(1, n_batches)
-    avg_soft_degree = running_soft_degree / max(1, n_batches)
-    avg_soft_entropy = running_soft_entropy / max(1, n_batches)
-    avg_soft_connectivity = running_soft_connectivity / max(1, n_batches)
-    avg_soft_temporal = running_soft_temporal / max(1, n_batches)
-    avg_soft_triangle = running_soft_triangle / max(1, n_batches)
-    avg_soft_mst = running_soft_mst / max(1, n_batches)
     avg_soft_pseudo_edge = running_soft_pseudo_edge / max(1, n_batches)
-    avg_soft_length_floor = running_soft_length_floor / max(1, n_batches)
-    avg_inside_ratio = running_inside_ratio / max(1, n_batches)
-    avg_degree_pen = running_degree_pen / max(1, n_batches)
-    avg_degree_max = running_degree_max / max(1, n_batches)
     avg_pressure_mse = running_pressure_mse / max(1, n_batches)
     avg_demand_mse = running_demand_mse / max(1, n_batches)
 
@@ -1553,23 +1358,9 @@ def train_one_epoch(model, dataloader, optimizer, device, hparams):
         "mae": train_mae,
         "mape": train_mape,
         "graph_loss": avg_graph_loss,
-        "geo_loss": avg_geo,
-        "smooth_loss": avg_smooth,
-        "knn_loss": avg_knn,
         "stability_loss": avg_stability,
         "topology_loss": avg_topology,
-        "soft_geo_loss": avg_soft_geo,
-        "soft_degree_loss": avg_soft_degree,
-        "soft_entropy": avg_soft_entropy,
-        "soft_connectivity_loss": avg_soft_connectivity,
-        "soft_temporal_loss": avg_soft_temporal,
-        "soft_triangle_loss": avg_soft_triangle,
-        "soft_mst_loss": avg_soft_mst,
         "soft_pseudo_edge_loss": avg_soft_pseudo_edge,
-        "soft_length_floor_loss": avg_soft_length_floor,
-        "inside_ratio": avg_inside_ratio,
-        "degree_penalty": avg_degree_pen,
-        "degree_max_batch": avg_degree_max,
         "pressure_mse": avg_pressure_mse,
         "demand_mse": avg_demand_mse,
     }
@@ -1586,7 +1377,11 @@ def evaluate(model, dataloader, device, hparams, split="val"):
     running_mse = 0.0
     running_pressure_mse = 0.0
     running_demand_mse = 0.0
+    running_stability = 0.0
+    running_topology = 0.0
+    running_soft_pseudo_edge = 0.0
     n_batches = 0
+    lam_stability = _get_float_attr(hparams, "lambda_stability", 0.0)
 
     for batch in dataloader:
         edge_index = batch.edge_index.to(device)
@@ -1615,9 +1410,18 @@ def evaluate(model, dataloader, device, hparams, split="val"):
             loss_pressure = float(loss_forecasting.detach().item())
             loss_demand = 0.0
 
+        loss_stability = _compute_dgm_stability_loss(model, device)
+        loss_soft_topology, topology_debug = _compute_soft_topology_loss(
+            model, batch, device, hparams, x_flat=x
+        )
+        topology_loss = loss_soft_topology + lam_stability * loss_stability
+
         running_mse += float(loss_forecasting.detach().item())
         running_pressure_mse += loss_pressure
         running_demand_mse += loss_demand
+        running_stability += float(loss_stability.detach().item())
+        running_topology += float(topology_loss.detach().item())
+        running_soft_pseudo_edge += topology_debug["soft_pseudo_edge"]
         n_batches += 1
 
         all_y_true.append(y.detach().cpu().numpy())
@@ -1632,6 +1436,9 @@ def evaluate(model, dataloader, device, hparams, split="val"):
     mse = running_mse / max(1, n_batches)
     pressure_mse = running_pressure_mse / max(1, n_batches)
     demand_mse = running_demand_mse / max(1, n_batches)
+    stability = running_stability / max(1, n_batches)
+    topology = running_topology / max(1, n_batches)
+    soft_pseudo_edge = running_soft_pseudo_edge / max(1, n_batches)
 
     stats = {
         "mse": mse,
@@ -1640,6 +1447,9 @@ def evaluate(model, dataloader, device, hparams, split="val"):
         "mape": mape,
         "pressure_mse": pressure_mse,
         "demand_mse": demand_mse,
+        "stability_loss": stability,
+        "topology_loss": topology,
+        "soft_pseudo_edge_loss": soft_pseudo_edge,
     }
     return stats
 
@@ -1769,6 +1579,7 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
     )
 
     n_epochs = hparams.max_epochs
+    selection_metric = getattr(hparams, "select_best_by", "val_mse")
     train_stats = None
     val_stats = None
 
@@ -1778,11 +1589,29 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
         "val_mse": [],
     }
 
-    # --- keep best validation snapshot in memory ---
+    def observable_validation_score(stats):
+        if stats is None:
+            return float("inf")
+        alpha = float(getattr(hparams, "alpha_forecast", 1.0))
+        mse = float(stats.get("mse", 0.0))
+        topology = float(
+            stats.get(
+                "topology_loss",
+                stats.get("soft_pseudo_edge_loss", 0.0),
+            )
+        )
+        return alpha * mse + (1.0 - alpha) * topology
+
+    # --- keep best validation snapshots in memory ---
     best_state_dict = None
     best_edges = None
     best_epoch = None
     best_val_stats = None
+    best_observable_state_dict = None
+    best_observable_edges = None
+    best_observable_epoch = None
+    best_observable_stats = None
+    best_observable_score = float("inf")
     best_proxy_state_dict = None
     best_proxy_edges = None
     best_proxy_epoch = None
@@ -1798,20 +1627,10 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
             f"| MAE: {train_stats['mae']:.4f} | MAPE: {train_stats['mape']:.4f} "
             f"| P-MSE: {train_stats.get('pressure_mse', float('nan')):.4f} "
             f"| D-MSE: {train_stats.get('demand_mse', float('nan')):.4f} "
-            f"| GraphLoss: {train_stats['graph_loss']:.4f} | Geo: {train_stats['geo_loss']:.4f} "
-            f"| Smooth: {train_stats['smooth_loss']:.4f} | kNN: {train_stats.get('knn_loss', 0.0):.4f} "
+            f"| GraphLoss: {train_stats['graph_loss']:.4f} "
             f"| Stability: {train_stats.get('stability_loss', 0.0):.4f} "
-            f"| Topo: {train_stats.get('topology_loss', 0.0):.4f} "
-            f"| SoftGeo: {train_stats.get('soft_geo_loss', 0.0):.4f} "
-            f"| SoftDeg: {train_stats.get('soft_degree_loss', 0.0):.4f} "
-            f"| SoftConn: {train_stats.get('soft_connectivity_loss', 0.0):.4f} "
-            f"| SoftTemp: {train_stats.get('soft_temporal_loss', 0.0):.4f} "
-            f"| SoftTri: {train_stats.get('soft_triangle_loss', 0.0):.4f} "
-            f"| SoftMST: {train_stats.get('soft_mst_loss', 0.0):.4f} "
-            f"| SoftPseudo: {train_stats.get('soft_pseudo_edge_loss', 0.0):.4f} "
-            f"| SoftLenFloor: {train_stats.get('soft_length_floor_loss', 0.0):.4f} "
-            f"| Inside-kNN: {train_stats.get('inside_ratio', 0.0):.4f} "
-            f"| DegPen: {train_stats.get('degree_penalty', 0.0):.4f} | DegMax: {train_stats.get('degree_max_batch', 0.0):.2f}"
+            f"| L_Q: {train_stats.get('soft_pseudo_edge_loss', 0.0):.4f} "
+            f"| L_topology: {train_stats.get('topology_loss', 0.0):.4f}"
         )
 
         history["epoch"].append(epoch)
@@ -1823,10 +1642,32 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
                 f"Val   - MSE: {val_stats['mse']:.4f} | RMSE: {val_stats['rmse']:.4f} "
                 f"| MAE: {val_stats['mae']:.4f} | MAPE: {val_stats['mape']:.4f} "
                 f"| P-MSE: {val_stats.get('pressure_mse', float('nan')):.4f} "
-                f"| D-MSE: {val_stats.get('demand_mse', float('nan')):.4f}"
+                f"| D-MSE: {val_stats.get('demand_mse', float('nan')):.4f} "
+                f"| L_Q: {val_stats.get('soft_pseudo_edge_loss', 0.0):.4f} "
+                f"| L_topology: {val_stats.get('topology_loss', 0.0):.4f}"
             )
 
-            proxy_stats = _compute_topology_proxy_score(model, val_loader, device, hparams)
+            observable_score = observable_validation_score(val_stats)
+            print(f"ValObjective - J_obs: {observable_score:.4f}")
+            if observable_score < best_observable_score:
+                best_observable_score = observable_score
+                best_observable_epoch = epoch
+                best_observable_stats = dict(val_stats)
+                best_observable_stats["observable_val_score"] = observable_score
+                best_observable_state_dict = {
+                    k: v.detach().cpu().clone()
+                    for k, v in model.state_dict().items()
+                }
+                if hasattr(model, "edges") and model.edges is not None:
+                    best_observable_edges = model.edges.detach().cpu().clone()
+                print(
+                    f"[INFO] New best observable-validation epoch: {best_observable_epoch} | "
+                    f"J_obs={best_observable_score:.6f}"
+                )
+
+            proxy_stats = None
+            if selection_metric == "topology_proxy":
+                proxy_stats = _compute_topology_proxy_score(model, val_loader, device, hparams)
             if proxy_stats is not None:
                 print(
                     "TopoProxy - "
@@ -1888,6 +1729,7 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
     learned_edges_path = os.path.join(export_dir, "dgm_learned_edges.pt")
     learned_edges_last_path = os.path.join(export_dir, "dgm_learned_edges_last.pt")
     learned_edges_best_path = os.path.join(export_dir, "dgm_learned_edges_best.pt")
+    learned_edges_observable_path = os.path.join(export_dir, "dgm_learned_edges_best_observable_val.pt")
     learned_edges_proxy_path = os.path.join(export_dir, "dgm_learned_edges_best_topology_proxy.pt")
 
     # Save last-epoch edges separately
@@ -1915,14 +1757,28 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
         torch.save(best_proxy_edges, learned_edges_proxy_path)
         print(f"[INFO] Saved BEST-topology-proxy learned graph edges to: {learned_edges_proxy_path}")
 
-    selection_metric = getattr(hparams, "select_best_by", "val_mse")
     selected_state_dict = best_state_dict
+    selected_edges = best_edges
     selected_epoch = best_epoch
     selected_name = "BEST-validation"
-    if selection_metric == "topology_proxy" and best_proxy_state_dict is not None:
+    if selection_metric == "observable_val" and best_observable_state_dict is not None:
+        selected_state_dict = best_observable_state_dict
+        selected_edges = best_observable_edges
+        selected_epoch = best_observable_epoch
+        selected_name = "BEST-observable-validation"
+    elif selection_metric == "topology_proxy" and best_proxy_state_dict is not None:
         selected_state_dict = best_proxy_state_dict
+        selected_edges = best_proxy_edges
         selected_epoch = best_proxy_epoch
         selected_name = "BEST-topology-proxy"
+
+    if best_observable_edges is not None:
+        torch.save(best_observable_edges, learned_edges_observable_path)
+        print(f"[INFO] Saved BEST-observable-validation learned graph edges to: {learned_edges_observable_path}")
+
+    if selected_edges is not None:
+        torch.save(selected_edges, learned_edges_path)
+        print(f"[INFO] Saved selected learned graph edges to main file: {learned_edges_path}")
 
     # Restore selected model before test/export, if available
     if selected_state_dict is not None:
@@ -1964,6 +1820,11 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
         torch.save(best_state_dict, best_ckpt_path)
         print(f"[INFO] Saved BEST-validation model to: {best_ckpt_path}")
 
+    if best_observable_state_dict is not None:
+        observable_ckpt_path = ckpt_path.replace(".pt", "_best_observable_val.pt")
+        torch.save(best_observable_state_dict, observable_ckpt_path)
+        print(f"[INFO] Saved BEST-observable-validation model to: {observable_ckpt_path}")
+
     if best_proxy_state_dict is not None:
         proxy_ckpt_path = ckpt_path.replace(".pt", "_best_topology_proxy.pt")
         torch.save(best_proxy_state_dict, proxy_ckpt_path)
@@ -1996,6 +1857,9 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
     if best_epoch is not None:
         print(f"[INFO] Best validation epoch: {best_epoch}")
         print(f"[INFO] Best validation stats: {best_val_stats}")
+    if best_observable_epoch is not None:
+        print(f"[INFO] Best observable-validation epoch: {best_observable_epoch}")
+        print(f"[INFO] Best observable-validation stats: {best_observable_stats}")
     if best_proxy_epoch is not None:
         print(f"[INFO] Best topology-proxy epoch: {best_proxy_epoch}")
         print(f"[INFO] Best topology-proxy stats: {best_proxy_stats}")
@@ -2006,6 +1870,8 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
         "selected_epoch": selected_epoch,
         "best_validation_epoch": best_epoch,
         "best_validation": best_val_stats,
+        "best_observable_validation_epoch": best_observable_epoch,
+        "best_observable_validation": best_observable_stats,
         "best_topology_proxy_epoch": best_proxy_epoch,
         "best_topology_proxy": best_proxy_stats,
         "last_train": train_stats,
@@ -2026,6 +1892,8 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
         "history": history,
         "best_epoch": best_epoch,
         "best_val_stats": best_val_stats,
+        "best_observable_epoch": best_observable_epoch,
+        "best_observable_stats": best_observable_stats,
     }
 
 

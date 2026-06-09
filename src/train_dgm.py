@@ -395,6 +395,12 @@ def _build_static_pseudo_edge_target(dist, hparams, device):
         int(getattr(hparams, "pseudo_topk", 2)),
         float(getattr(hparams, "pseudo_partial_ridge", 0.05)),
         int(getattr(hparams, "pseudo_max_lag", 6)),
+        int(getattr(hparams, "pseudo_bridge_topk", 1)),
+        float(getattr(hparams, "pseudo_bridge_mass", 0.15)),
+        float(getattr(hparams, "pseudo_bridge_quantile", 0.65)),
+        float(getattr(hparams, "pseudo_bridge_temperature", 0.08)),
+        float(getattr(hparams, "pseudo_bridge_min_temporal", 0.55)),
+        int(getattr(hparams, "pseudo_bridge_candidate_k", 0)),
     )
     cached = getattr(hparams, "_pseudo_target_cache", None)
     if isinstance(cached, dict) and cached.get("key") == cache_key:
@@ -420,6 +426,8 @@ def _build_static_pseudo_edge_target(dist, hparams, device):
     eye = torch.eye(n, device=device, dtype=torch.bool)
     geo_affinity = torch.exp(-dist / geo_tau).masked_fill(eye, 0.0)
 
+    prebuilt_target = None
+
     if mode == "geo_only":
         score = geo_affinity
     elif mode == "demand_corr" and demand is not None:
@@ -435,7 +443,7 @@ def _build_static_pseudo_edge_target(dist, hparams, device):
         partial = _partial_corr_affinity(pressure, ridge=float(getattr(hparams, "pseudo_partial_ridge", 0.05)))
         smooth = _pressure_smooth_affinity(pressure)
         score = geo_affinity * _offdiag_minmax(partial * smooth)
-    elif mode in {"global_dynamic_proxy", "geo_global_dynamic_proxy"}:
+    elif mode in {"global_dynamic_proxy", "geo_global_dynamic_proxy", "geo_global_dynamic_bridge_proxy"}:
         if demand is None:
             demand_global = _global_var_affinity(pressure, ridge=float(getattr(hparams, "pseudo_partial_ridge", 0.05)))
             pressure_from_demand = demand_global
@@ -448,7 +456,19 @@ def _build_static_pseudo_edge_target(dist, hparams, device):
             )
         smooth = _pressure_smooth_affinity(pressure)
         dynamic = _offdiag_minmax(smooth * torch.maximum(demand_global, pressure_from_demand))
-        score = dynamic if mode == "global_dynamic_proxy" else geo_affinity * dynamic
+        if mode == "global_dynamic_proxy":
+            score = dynamic
+        elif mode == "geo_global_dynamic_proxy":
+            score = geo_affinity * dynamic
+        else:
+            prebuilt_target = _build_static_global_dynamic_bridge_target(
+                geo_affinity=geo_affinity,
+                dynamic_affinity=dynamic,
+                dist=dist,
+                hparams=hparams,
+                device=device,
+            )
+            score = geo_affinity * dynamic
     elif mode == "geo_pressure_evidence":
         corr = _positive_corr_affinity(pressure)
         smooth = _pressure_smooth_affinity(pressure)
@@ -457,6 +477,10 @@ def _build_static_pseudo_edge_target(dist, hparams, device):
     else:
         corr = _positive_corr_affinity(pressure)
         score = geo_affinity * corr
+
+    if prebuilt_target is not None:
+        hparams._pseudo_target_cache = {"key": cache_key, "target": prebuilt_target.detach().cpu()}
+        return prebuilt_target
 
     candidate_k = int(getattr(hparams, "pseudo_candidate_k", 0))
     if candidate_k > 0:
@@ -480,6 +504,53 @@ def _build_static_pseudo_edge_target(dist, hparams, device):
 
     hparams._pseudo_target_cache = {"key": cache_key, "target": target.detach().cpu()}
     return target
+
+
+def _build_static_global_dynamic_bridge_target(geo_affinity, dynamic_affinity, dist, hparams, device):
+    """Static two-channel Q for sparse bridge edges, using only observable signals."""
+    n = dist.shape[0]
+    eye = torch.eye(n, device=device, dtype=torch.bool)
+    local_topk = min(max(1, int(getattr(hparams, "pseudo_topk", 2))), n - 1)
+    bridge_topk = min(max(1, int(getattr(hparams, "pseudo_bridge_topk", 1))), n - 1)
+    bridge_mass = max(0.0, min(0.5, _get_float_attr(hparams, "pseudo_bridge_mass", 0.15)))
+
+    local_score = geo_affinity * dynamic_affinity
+    local_candidate_k = int(getattr(hparams, "pseudo_candidate_k", 0))
+    if local_candidate_k > 0:
+        local_candidate_k = min(local_candidate_k, n - 1)
+        idx = torch.topk(dist.masked_fill(eye, float("inf")), k=local_candidate_k, largest=False, dim=1).indices
+        local_mask = torch.zeros((n, n), device=device, dtype=torch.bool)
+        rows = torch.arange(n, device=device).unsqueeze(1).expand_as(idx)
+        local_mask[rows, idx] = True
+        local_mask = local_mask | local_mask.t()
+        local_score = local_score.masked_fill(~local_mask, 0.0)
+
+    bridge_score = _build_bridge_score(
+        dist=dist,
+        temporal_affinity=dynamic_affinity,
+        hparams=hparams,
+        device=device,
+    )
+
+    local_target = _row_topk_target(local_score, local_topk)
+    bridge_target = _row_topk_target(bridge_score, bridge_topk)
+    fallback = geo_affinity / (geo_affinity.sum(dim=1, keepdim=True) + 1e-12)
+
+    target = (1.0 - bridge_mass) * local_target + bridge_mass * bridge_target
+
+    include_mst = bool(getattr(hparams, "pseudo_include_mst", True))
+    if include_mst:
+        mst_edges = _geometric_mst_edges(dist)
+        if mst_edges.numel() > 0:
+            u = mst_edges[:, 0]
+            v = mst_edges[:, 1]
+            mst_bonus = float(getattr(hparams, "pseudo_mst_bonus", 1.0))
+            target[u, v] = torch.maximum(target[u, v], geo_affinity[u, v] * mst_bonus)
+            target[v, u] = torch.maximum(target[v, u], geo_affinity[v, u] * mst_bonus)
+
+    target = target.masked_fill(eye, 0.0)
+    row_sum = target.sum(dim=1, keepdim=True)
+    return torch.where(row_sum > 0.0, target / (row_sum + 1e-12), fallback).masked_fill(eye, 0.0)
 
 
 def _build_temporal_affinity(x_flat, hparams, n, device, mode):

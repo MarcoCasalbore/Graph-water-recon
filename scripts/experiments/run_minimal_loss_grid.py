@@ -125,6 +125,9 @@ def run_one(
         "run": run_name,
         "dataset": dataset_name,
         "mode": mode,
+        "loss_formula": "alpha*L_forecast+(1-alpha)*(lambda_Q*L_Q+lambda_stability*L_stability)",
+        "selection": "observable_val",
+        "lambda_Q": 1.0,
         "alpha": alpha,
         "topk": topk,
         "candidate_k": candidate_k,
@@ -148,8 +151,10 @@ def run_one(
 
 def collect_existing_run(run_dir: Path) -> dict:
     run_name = run_dir.name
-    parts = run_name.split("_")
-    dataset = next((name for name in DATASETS if run_name.startswith(f"{name}_")), parts[0] if parts else run_name)
+    dataset = next(
+        (name for name in sorted(DATASETS, key=len, reverse=True) if run_name.startswith(f"{name}_")),
+        run_name.split("_")[0] if run_name else run_name,
+    )
 
     forecast = read_json(run_dir / "forecast_metrics.json")
     comparison = read_json(run_dir / "graph_comparison_softprob" / "comparison_summary.json")
@@ -183,9 +188,10 @@ def collect_existing_run(run_dir: Path) -> dict:
     if epoch_match:
         epochs = int(epoch_match.group(1))
 
-    mode_prefix = f"{dataset}_"
-    mode_suffix = alpha_match.group(0) if alpha_match else "_a"
-    mode = run_name[len(mode_prefix):].split(mode_suffix.strip("_"))[0].rstrip("_") if run_name.startswith(mode_prefix) else ""
+    mode = ""
+    mode_match = re.match(rf"^{re.escape(dataset)}_(?P<mode>.+?)_a[0-9]+p[0-9]+_", run_name)
+    if mode_match:
+        mode = mode_match.group("mode")
 
     val_mse = float(val.get("mse", 0.0))
     val_topology = float(val.get("topology_loss", val.get("soft_pseudo_edge_loss", 0.0)))
@@ -195,6 +201,9 @@ def collect_existing_run(run_dir: Path) -> dict:
         "run": run_dir.name,
         "dataset": dataset,
         "mode": mode,
+        "loss_formula": "alpha*L_forecast+(1-alpha)*(lambda_Q*L_Q+lambda_stability*L_stability)",
+        "selection": "observable_val",
+        "lambda_Q": 1.0,
         "alpha": alpha,
         "topk": topk,
         "candidate_k": candidate_k,
@@ -235,6 +244,17 @@ def write_markdown(path: Path, rows: list[dict]) -> None:
         "`J_val = alpha * MSE_val + (1-alpha) * L_topology_val`.",
         "Ground-truth edges are used only for the reported F1/precision/recall metrics.",
         "",
+        "## Loss And Selection Settings",
+        "",
+        "```text",
+        "L = alpha * L_forecast + (1-alpha) * (lambda_Q * L_Q + lambda_stability * L_stability)",
+        "L_Q = mean_i -sum_j Q_ij log(P_ij + eps)",
+        "lambda_Q = 1.0",
+        "Q is built only from coordinates and observed time series.",
+        "Checkpoint selection: observable_val = alpha*MSE_val + (1-alpha)*L_topology_val",
+        "Ground truth is used only after each run is fixed, for reported metrics.",
+        "```",
+        "",
         "## Best By Observable Validation Objective",
         "",
         "| rank | run | J_val | val_mse | val_LQ | F1 | components |",
@@ -270,6 +290,8 @@ def main() -> None:
     parser.add_argument("--alphas", nargs="+", type=float, default=[0.05, 0.20, 0.40])
     parser.add_argument("--topks", nargs="+", type=int, default=[2])
     parser.add_argument("--candidate_ks", nargs="+", type=int, default=[2])
+    parser.add_argument("--candidate_policy", choices=["grid", "same_as_topk"], default="grid")
+    parser.add_argument("--candidate_min", type=int, default=2)
     parser.add_argument("--lambda_stabilities", nargs="+", type=float, default=[0.0])
     parser.add_argument("--epochs", type=int, default=25)
     parser.add_argument("--batch_size", type=int, default=32)
@@ -293,7 +315,12 @@ def main() -> None:
         for mode in args.modes:
             for alpha in args.alphas:
                 for topk in args.topks:
-                    for candidate_k in args.candidate_ks:
+                    candidate_ks = (
+                        [max(int(args.candidate_min), int(topk))]
+                        if args.candidate_policy == "same_as_topk"
+                        else args.candidate_ks
+                    )
+                    for candidate_k in candidate_ks:
                         for lambda_stability in args.lambda_stabilities:
                             row = run_one(
                                 dataset_name=dataset_name,

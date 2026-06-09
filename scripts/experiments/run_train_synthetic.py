@@ -213,6 +213,15 @@ def _global_dynamic_score(data_npz: str, mode: str, partial_ridge: float, geo_ta
     dist = np.sqrt(((xy[:, None, :] - xy[None, :, :]) ** 2).sum(axis=-1))
     geo = np.exp(-dist / max(float(geo_tau), 1e-6))
     np.fill_diagonal(geo, 0.0)
+    if mode == "geo_global_dynamic_bridge_proxy":
+        finite = dist[~np.eye(dist.shape[0], dtype=bool)]
+        threshold = np.quantile(finite, 0.65) if finite.size else 0.0
+        scale = np.std(finite) + 1e-12 if finite.size else 1.0
+        long_gate = 1.0 / (1.0 + np.exp(-(dist - threshold) / (0.15 * scale)))
+        evidence_gate = np.maximum(0.0, dynamic - 0.55) / max(1e-12, 1.0 - 0.55)
+        bridge = _minmax_offdiag(dynamic * evidence_gate * long_gate)
+        local = _minmax_offdiag(geo * dynamic)
+        return _minmax_offdiag(0.85 * local + 0.15 * bridge)
     return _minmax_offdiag(geo * dynamic)
 
 
@@ -733,6 +742,7 @@ def main() -> None:
             "geo_partial_bridge",
             "global_dynamic_proxy",
             "geo_global_dynamic_proxy",
+            "geo_global_dynamic_bridge_proxy",
         ],
         default="geo_temporal",
     )
@@ -833,6 +843,16 @@ def main() -> None:
             print("    Q score = geo_affinity * S_dynamic, then row top-k normalization.")
         else:
             print("    Q score = S_dynamic, then row top-k normalization.")
+    if params.pseudo_score_mode == "geo_global_dynamic_bridge_proxy":
+        print(
+            "  Q_global_dynamic_bridge strategy: same observable VAR score as geo_global_dynamic_proxy,"
+        )
+        print(
+            "    but Q row mass is split into local geo-dynamic support plus a small long-edge bridge channel."
+        )
+        print(
+            "    Bridge candidates use only S_dynamic evidence gated by relative geometric length; no GT edges."
+        )
     print("  Checkpoint selection can use J_obs = alpha*MSE_val + (1-alpha)*L_topology_val; no GT edges.")
     print("  Change in this strategy: minimal direct weak edge classification on observable pseudo-target Q.")
     print("==========================================")

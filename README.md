@@ -23,10 +23,9 @@ water-like benchmarks:
 - `water_branch_n50_bridges`
 - `water_branch_n50_loopy`
 
-The current valid non-oracle pipeline reaches topology F1 around `0.74-0.80`
-when hyperparameters and checkpoints are selected only through observable
-validation quantities. See
-[docs/MINIMAL_LOSS_RESULTS.md](docs/MINIMAL_LOSS_RESULTS.md).
+The latest strict GT-free proxy study reaches held-out topology F1 around
+`0.71-0.80` without using the true edge count. See
+[docs/PROXY_METHODOLOGY_STUDY.md](docs/PROXY_METHODOLOGY_STUDY.md).
 
 Older diagnostic sweeps can reach higher F1, but those are documented as
 diagnostics only because the decoder setting was selected after looking at
@@ -39,7 +38,7 @@ evidence for the next research step rather than a contradiction.
 
 ## Main Results
 
-Current non-oracle results selected by:
+Historical DGM results selected by:
 
 ```text
 J_obs = alpha * MSE_val + (1 - alpha) * L_topology_val
@@ -51,6 +50,10 @@ J_obs = alpha * MSE_val + (1 - alpha) * L_topology_val
 | water-branch base | `water_base_geo_global_dynamic_proxy_a0p40_q2_ck2_stab5p000_e25` | 0.7937 | 1 |
 | water-branch loopy | `water_loopy_geo_global_dynamic_proxy_a0p40_q2_ck2_stab5p000_e25` | 0.7534 | 1 |
 | water-branch bridges | `water_bridges_geo_global_dynamic_proxy_a0p40_q2_ck2_stab1p000_e25` | 0.7419 | 1 |
+
+These DGM values are now classified as diagnostic because their static export
+used a GT-derived edge budget. The proxy-methodology study supersedes them as
+the strict main claim; the next DGM grid uses the observable decoder.
 
 Example water-like reconstructions:
 
@@ -132,7 +135,10 @@ python scripts/experiments/run_train_synthetic.py \
   --check_val_every_n_epoch 5 \
   --batch_size 32 \
   --k 2 \
-  --static_top_edges 63 \
+  --static_top_edges 0 \
+  --static_row_k 3 \
+  --static_symmetry mutual \
+  --static_include_mst \
   --use_complementary_loss \
   --alpha_forecast 0.40 \
   --lambda_graph 0.0 \
@@ -189,7 +195,10 @@ python scripts/experiments/run_train_synthetic.py \
   --check_val_every_n_epoch 5 \
   --batch_size 32 \
   --k 2 \
-  --static_top_edges 63 \
+  --static_top_edges 0 \
+  --static_row_k 3 \
+  --static_symmetry mutual \
+  --static_include_mst \
   --use_complementary_loss \
   --alpha_forecast 0.40 \
   --lambda_graph 0.0 \

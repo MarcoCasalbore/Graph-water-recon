@@ -23,10 +23,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 DATASETS = {
-    "simple": ("data/synthetic/simple_water_n50", 61),
-    "water_base": ("data/synthetic/water_branch_n50_base", 63),
-    "water_bridges": ("data/synthetic/water_branch_n50_bridges", 62),
-    "water_loopy": ("data/synthetic/water_branch_n50_loopy", 73),
+    "simple": "data/synthetic/simple_water_n50",
+    "water_base": "data/synthetic/water_branch_n50_base",
+    "water_bridges": "data/synthetic/water_branch_n50_bridges",
+    "water_loopy": "data/synthetic/water_branch_n50_loopy",
 }
 
 
@@ -45,7 +45,6 @@ def run_cmd(cmd: list[str], dry_run: bool) -> None:
 def run_one(
     dataset_name: str,
     data_dir: Path,
-    budget: int,
     mode: str,
     alpha: float,
     topk: int,
@@ -81,7 +80,12 @@ def run_one(
         "--k",
         str(topk),
         "--static_top_edges",
-        str(budget),
+        "0",
+        "--static_row_k",
+        "3",
+        "--static_symmetry",
+        "mutual",
+        "--static_include_mst",
         "--use_complementary_loss",
         "--alpha_forecast",
         str(alpha),
@@ -311,7 +315,7 @@ def main() -> None:
         return
 
     for dataset_name in args.datasets:
-        data_dir_str, budget = DATASETS[dataset_name]
+        data_dir_str = DATASETS[dataset_name]
         for mode in args.modes:
             for alpha in args.alphas:
                 for topk in args.topks:
@@ -325,7 +329,6 @@ def main() -> None:
                             row = run_one(
                                 dataset_name=dataset_name,
                                 data_dir=PROJECT_ROOT / data_dir_str,
-                                budget=budget,
                                 mode=mode,
                                 alpha=alpha,
                                 topk=topk,

@@ -1,5 +1,11 @@
 # Minimal Observable Loss Experiments
 
+> Protocol correction: the historical runs below exported a fixed number of
+> edges equal to the benchmark's ground-truth edge count. They remain useful
+> diagnostics, but they are not strict GT-free main results. New admissible
+> runs use `static_top_edges=0` and the observable row-top-k/mutual/MST decoder
+> described in [PROXY_METHODOLOGY_STUDY.md](PROXY_METHODOLOGY_STUDY.md).
+
 These experiments test a deliberately small loss for synthetic water-like graph
 reconstruction. Ground-truth edges are not used for training, checkpoint
 selection, masks, or hyperparameter selection. They are used only after a run is

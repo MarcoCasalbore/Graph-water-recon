@@ -538,6 +538,33 @@ def _local_probability_blocks(logits: torch.Tensor, num_nodes: int) -> list[torc
     return blocks
 
 
+def decode_observable_score(
+    score: torch.Tensor,
+    row_k: int,
+    symmetry: str,
+    include_mst: bool,
+    data_npz: str,
+) -> list[tuple[int, int]]:
+    """Decode an edge score without a GT-derived global edge budget."""
+    values = score.detach().cpu().numpy().astype(np.float64)
+    n = values.shape[0]
+    np.fill_diagonal(values, -np.inf)
+    k = min(max(1, int(row_k)), n - 1)
+    neighbors = np.argpartition(-values, kth=k - 1, axis=1)[:, :k]
+    directed = {(u, int(v)) for u in range(n) for v in neighbors[u]}
+    edges = {
+        _canonical(u, v)
+        for u, v in directed
+        if symmetry == "union" or (v, u) in directed
+    }
+    if include_mst:
+        npz = np.load(data_npz)
+        mst_mask = _geometry_mst_mask(npz["node_xy"])
+        mst_u, mst_v = np.where(np.triu(mst_mask, k=1))
+        edges.update(_canonical(int(u), int(v)) for u, v in zip(mst_u, mst_v))
+    return sorted(edges)
+
+
 def export_soft_probability_graph(
     model,
     loader,
@@ -546,6 +573,9 @@ def export_soft_probability_graph(
     top_edges: int,
     ensure_connected: bool,
     score_out_path: Path | None = None,
+    row_k: int = 3,
+    symmetry: str = "mutual",
+    include_mst: bool = True,
 ) -> Path:
     """Export a static graph from mean DGM soft probabilities P_ij."""
     device = next(model.parameters()).device
@@ -584,9 +614,22 @@ def export_soft_probability_graph(
         for j in range(i + 1, n):
             score_dict[(i, j)] = float(score[i, j].item())
 
-    edges = [
-        edge for edge, _ in sorted(score_dict.items(), key=lambda item: item[1], reverse=True)[:top_edges]
-    ]
+    if top_edges > 0:
+        edges = [
+            edge for edge, _ in sorted(score_dict.items(), key=lambda item: item[1], reverse=True)[:top_edges]
+        ]
+        selection_label = f"top {top_edges} edges by mean symmetrized P_ij"
+    else:
+        edges = decode_observable_score(
+            score=score,
+            row_k=row_k,
+            symmetry=symmetry,
+            include_mst=include_mst,
+            data_npz=params.data_npz,
+        )
+        selection_label = (
+            f"observable row-top-{row_k}, symmetry={symmetry}, geometric_mst={include_mst}"
+        )
 
     if ensure_connected:
         edges = connect_components_with_geometry(
@@ -611,7 +654,7 @@ def export_soft_probability_graph(
 
     print("[INFO] Soft probability graph export")
     print(f"       probability blocks inspected: {n_blocks}")
-    print(f"       selection: top {top_edges} edges by mean symmetrized P_ij")
+    print(f"       selection: {selection_label}")
     print(f"       undirected static edges: {len(edges)}")
     if score_out_path is not None:
         print(f"       score matrix saved to: {score_out_path}")
@@ -767,7 +810,13 @@ def main() -> None:
     parser.add_argument("--proxy_frequency_weight", type=float, default=0.05)
     parser.add_argument("--soft_degree_target", type=float, default=1.0)
     parser.add_argument("--consensus_threshold", type=float, default=0.5)
-    parser.add_argument("--static_top_edges", type=int, default=75)
+    parser.add_argument(
+        "--static_top_edges", type=int, default=0,
+        help="Diagnostic fixed edge budget. Keep at 0 for the GT-free observable decoder.",
+    )
+    parser.add_argument("--static_row_k", type=int, default=3)
+    parser.add_argument("--static_symmetry", choices=["union", "mutual"], default="mutual")
+    parser.add_argument("--static_include_mst", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--ensure_connected_consensus", action="store_true")
     parser.add_argument("--export_soft_graph", action="store_true")
     parser.add_argument("--save_soft_score", action="store_true")
@@ -937,6 +986,9 @@ def main() -> None:
             top_edges=args.static_top_edges,
             ensure_connected=args.ensure_connected_consensus,
             score_out_path=(args.out_dir / "dgm_soft_score.npy") if args.save_soft_score else None,
+            row_k=args.static_row_k,
+            symmetry=args.static_symmetry,
+            include_mst=args.static_include_mst,
         )
         soft_compare_cmd = [
             sys.executable,

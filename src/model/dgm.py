@@ -419,6 +419,27 @@ class DGMModel(nn.Module):
         fc_layers = hparams.fc_layers
         self.num_nodes = hparams.num_nodes
 
+        coordinate_dim = int(getattr(hparams, "coordinate_embedding_dim", 0))
+        self.coordinate_embedding = None
+        if coordinate_dim > 0:
+            xy = torch.as_tensor(getattr(hparams, "node_xy"), dtype=torch.float32)
+            xy = xy[: self.num_nodes, :2]
+            xy = (xy - xy.mean(dim=0, keepdim=True)) / (xy.std(dim=0, keepdim=True) + 1e-8)
+            basis = [
+                xy[:, 0], xy[:, 1], xy[:, 0] ** 2, xy[:, 1] ** 2,
+                xy[:, 0] * xy[:, 1], torch.sin(torch.pi * xy[:, 0]),
+                torch.sin(torch.pi * xy[:, 1]), torch.ones(self.num_nodes),
+            ]
+            table = torch.stack(basis, dim=1)
+            if coordinate_dim <= table.shape[1]:
+                table = table[:, :coordinate_dim]
+            else:
+                table = F.pad(table, (0, coordinate_dim - table.shape[1]))
+            self.coordinate_embedding = nn.Embedding.from_pretrained(
+                table,
+                freeze=not bool(getattr(hparams, "coordinate_embedding_trainable", True)),
+            )
+
         self.graph_f = ModuleList()
         self.node_g = ModuleList()
         for i, (dgm_l, conv_l) in enumerate(zip(dgm_layers, conv_layers)):
@@ -512,6 +533,9 @@ class DGMModel(nn.Module):
         self.best_rmse = 1000
 
     def forward(self, x, edges=None, edges_weight=None):
+        if self.coordinate_embedding is not None:
+            node_ids = torch.arange(x.shape[0], device=x.device) % self.num_nodes
+            x = torch.cat([x, self.coordinate_embedding(node_ids)], dim=-1)
         if self.params.pre_fc is not None and len(self.params.pre_fc) > 0:
             x = self.pre_fc(x)
 

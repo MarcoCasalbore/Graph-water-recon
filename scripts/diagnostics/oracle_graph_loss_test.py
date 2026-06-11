@@ -28,10 +28,14 @@ import sys
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+EXPERIMENT_DIR = PROJECT_ROOT / "scripts" / "experiments"
+if str(EXPERIMENT_DIR) not in sys.path:
+    sys.path.insert(0, str(EXPERIMENT_DIR))
 
 from src.config import Parameters
 from src.dataset.dataset_epanet import EpanetDataModule
 from src.train_dgm import _flatten_for_dgm, _forecasting_loss_ctown, _reshape_ctown_epanet_batch
+from run_proxy_methodology_study import geometry_scores, graph_from_score, minmax_offdiag, mst_edges, smooth_score
 
 
 class FixedGraphForecaster(nn.Module):
@@ -150,6 +154,8 @@ def evaluate(model, loader, local_edge_index, params, device) -> dict[str, float
 
 
 def train_one_graph(name: str, edges: set[tuple[int, int]], loaders, params, args, device) -> dict:
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
     train_loader, val_loader, test_loader = loaders
     local_edge_index = to_directed_edge_index(edges)
 
@@ -204,14 +210,26 @@ def train_one_graph(name: str, edges: set[tuple[int, int]], loaders, params, arg
     }
 
 
-def load_graph_variants(args, npz, num_nodes: int) -> dict[str, set[tuple[int, int]]]:
+def load_graph_variants(args, npz, meta: dict, num_nodes: int) -> dict[str, set[tuple[int, int]]]:
     rng = np.random.default_rng(args.seed)
     gt = undirected_set(npz["edge_index"], num_nodes)
     variants = {
         "ground_truth": gt,
+        "no_edges": set(),
         "initial_proxy": undirected_set(npz["initial_edge_index"], num_nodes),
         f"knn_{args.knn_k}": knn_edges(npz["node_xy"].astype(np.float32), args.knn_k),
     }
+    xy = npz["node_xy"][0] if npz["node_xy"].ndim == 3 else npz["node_xy"]
+    train_end = int(meta["splits"]["train"]["end"])
+    observable_score = minmax_offdiag(
+        geometry_scores(xy)["geo_rank"] * smooth_score(npz["pressure"][:train_end])
+    )
+    variants["observable_proxy"] = graph_from_score(
+        observable_score,
+        row_k=args.proxy_row_k,
+        symmetry=args.proxy_symmetry,
+        mst=mst_edges(xy) if args.proxy_include_mst else None,
+    )
 
     for i in range(1, args.random_repeats + 1):
         variants[f"random_same_edges_{i}"] = random_edges(num_nodes, len(gt), rng)
@@ -238,6 +256,9 @@ def main() -> None:
     parser.add_argument("--lags", type=int, default=24)
     parser.add_argument("--knn_k", type=int, default=6)
     parser.add_argument("--random_repeats", type=int, default=2)
+    parser.add_argument("--proxy_row_k", type=int, default=3)
+    parser.add_argument("--proxy_symmetry", choices=["union", "mutual"], default="mutual")
+    parser.add_argument("--proxy_include_mst", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -249,6 +270,7 @@ def main() -> None:
     data_npz = args.data_dir / "data.npz"
     meta_json = args.data_dir / "meta.json"
     npz = np.load(data_npz)
+    meta = json.loads(meta_json.read_text(encoding="utf-8"))
     num_nodes = int(npz["pressure"].shape[1])
 
     class CliArgs:
@@ -270,7 +292,7 @@ def main() -> None:
     dm = EpanetDataModule(params)
     loaders = (dm.train_dataloader(), dm.val_dataloader(), dm.test_dataloader())
 
-    variants = load_graph_variants(args, npz, num_nodes)
+    variants = load_graph_variants(args, npz, meta, num_nodes)
     gt_edges = variants["ground_truth"]
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

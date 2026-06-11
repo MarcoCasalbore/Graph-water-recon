@@ -1325,7 +1325,11 @@ def train_one_epoch(model, dataloader, optimizer, device, hparams):
 
     lam_graph = _get_float_attr(hparams, "lambda_graph", 0.0)
     lam_stability = _get_float_attr(hparams, "lambda_stability", 0.0)
-    alpha_forecast = _get_float_attr(hparams, "alpha_forecast", 1.0)
+    alpha_forecast = _get_float_attr(
+        hparams,
+        "current_alpha_forecast",
+        _get_float_attr(hparams, "alpha_forecast", 1.0),
+    )
     use_complementary_loss = bool(getattr(hparams, "use_complementary_loss", False))
 
     for batch in dataloader:
@@ -1434,6 +1438,7 @@ def train_one_epoch(model, dataloader, optimizer, device, hparams):
         "soft_pseudo_edge_loss": avg_soft_pseudo_edge,
         "pressure_mse": avg_pressure_mse,
         "demand_mse": avg_demand_mse,
+        "alpha_forecast": alpha_forecast,
     }
     return stats
 
@@ -1658,12 +1663,27 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
         "epoch": [],
         "train_mse": [],
         "val_mse": [],
+        "alpha_forecast": [],
     }
+
+    alpha_start = float(getattr(hparams, "alpha_forecast_start", hparams.alpha_forecast))
+    alpha_end = float(getattr(hparams, "alpha_forecast_end", hparams.alpha_forecast))
+    alpha_schedule_epochs = int(getattr(hparams, "alpha_schedule_epochs", 0))
+    alpha_hold_epochs = int(getattr(hparams, "alpha_hold_epochs", 0))
+
+    def scheduled_alpha(epoch):
+        if epoch <= alpha_hold_epochs:
+            return alpha_start
+        if alpha_schedule_epochs <= 1:
+            return alpha_end
+        ramp_epoch = epoch - alpha_hold_epochs
+        progress = min(1.0, max(0.0, (ramp_epoch - 1) / float(alpha_schedule_epochs - 1)))
+        return alpha_start + progress * (alpha_end - alpha_start)
 
     def observable_validation_score(stats):
         if stats is None:
             return float("inf")
-        alpha = float(getattr(hparams, "alpha_forecast", 1.0))
+        alpha = alpha_end
         mse = float(stats.get("mse", 0.0))
         topology = float(
             stats.get(
@@ -1690,7 +1710,12 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
     best_proxy_score = float("inf")
 
     for epoch in range(1, n_epochs + 1):
-        print(f"\nEpoch {epoch}/{n_epochs}")
+        hparams.current_alpha_forecast = scheduled_alpha(epoch)
+        print(
+            f"\nEpoch {epoch}/{n_epochs} | "
+            f"alpha_forecast={hparams.current_alpha_forecast:.4f} | "
+            f"topology_weight={1.0 - hparams.current_alpha_forecast:.4f}"
+        )
 
         train_stats = train_one_epoch(model, train_loader, optimizer, device, hparams)
         print(
@@ -1706,6 +1731,7 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
 
         history["epoch"].append(epoch)
         history["train_mse"].append(train_stats["mse"])
+        history["alpha_forecast"].append(hparams.current_alpha_forecast)
 
         if epoch % hparams.check_val_every_n_epoch == 0 and val_loader is not None:
             val_stats = evaluate(model, val_loader, device, hparams, split="val")

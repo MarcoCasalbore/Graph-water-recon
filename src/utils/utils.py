@@ -77,7 +77,8 @@ def set_params_wrt_dataset(run_params, train_loader):
         elif run_params.dataset_name in ['METR-LA', 'solar', 'electricity']:
             run_params.pre_fc[0] = run_params.lags
         elif run_params.dataset_name in WATER_LIKE_DATASETS:
-            run_params.pre_fc[0] = run_params.lags * run_params.input_features
+            coordinate_dim = int(getattr(run_params, "coordinate_embedding_dim", 0))
+            run_params.pre_fc[0] = run_params.lags * run_params.input_features + coordinate_dim
         else:
             raise ValueError('Define dataset name correctly!')
 

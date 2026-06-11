@@ -28,6 +28,9 @@ The latest strict GT-free proxy study reaches held-out topology F1 around
 [docs/PROXY_METHODOLOGY_STUDY.md](docs/PROXY_METHODOLOGY_STUDY.md).
 The direct proxy-landscape stress test is in
 [docs/PROXY_LANDSCAPE_DIAGNOSTIC.md](docs/PROXY_LANDSCAPE_DIAGNOSTIC.md).
+Coordinate embeddings, topology-first curriculum, and fixed-graph forecasting
+experiments are reported in
+[docs/PROFESSOR_STRATEGY_RESULTS.md](docs/PROFESSOR_STRATEGY_RESULTS.md).
 
 Older diagnostic sweeps can reach higher F1, but those are documented as
 diagnostics only because the decoder setting was selected after looking at

@@ -373,6 +373,18 @@ def configure_run(args: argparse.Namespace) -> Parameters:
     params.lambda_stability = args.lambda_stability
     params.use_complementary_loss = args.use_complementary_loss
     params.alpha_forecast = args.alpha_forecast
+    params.alpha_forecast_start = (
+        args.alpha_forecast if args.alpha_forecast_start is None else args.alpha_forecast_start
+    )
+    params.alpha_forecast_end = (
+        args.alpha_forecast if args.alpha_forecast_end is None else args.alpha_forecast_end
+    )
+    params.alpha_schedule_epochs = args.alpha_schedule_epochs
+    params.alpha_hold_epochs = args.alpha_hold_epochs
+    params.coordinate_embedding_dim = args.coordinate_embedding_dim
+    params.coordinate_embedding_trainable = args.coordinate_embedding_trainable
+    node_xy = np.load(params.data_npz)["node_xy"].astype(np.float32)
+    params.node_xy = node_xy[0] if node_xy.ndim == 3 else node_xy
     params.lambda_soft_pseudo_edge = args.lambda_soft_pseudo_edge
     params.pseudo_geo_tau = args.pseudo_geo_tau
     params.pseudo_temporal_weight = args.pseudo_temporal_weight
@@ -765,6 +777,19 @@ def main() -> None:
     parser.add_argument("--lambda_stability", type=float, default=0.0)
     parser.add_argument("--use_complementary_loss", action="store_true")
     parser.add_argument("--alpha_forecast", type=float, default=1.0)
+    parser.add_argument("--alpha_forecast_start", type=float, default=None)
+    parser.add_argument("--alpha_forecast_end", type=float, default=None)
+    parser.add_argument(
+        "--alpha_schedule_epochs", type=int, default=0,
+        help="Number of ramp epochs from alpha start to alpha end.",
+    )
+    parser.add_argument("--alpha_hold_epochs", type=int, default=0)
+    parser.add_argument("--coordinate_embedding_dim", type=int, default=0)
+    parser.add_argument(
+        "--coordinate_embedding_trainable",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     parser.add_argument("--lambda_soft_pseudo_edge", type=float, default=0.0)
     parser.add_argument("--pseudo_geo_tau", type=float, default=1.0)
     parser.add_argument("--pseudo_temporal_weight", type=float, default=0.5)
@@ -855,6 +880,16 @@ def main() -> None:
     print(f"lambda_stability  : {params.lambda_stability}")
     print(f"complementary_loss: {params.use_complementary_loss}")
     print(f"alpha_forecast    : {params.alpha_forecast}")
+    print(
+        "alpha_schedule    : "
+        f"{params.alpha_forecast_start} -> {params.alpha_forecast_end} "
+        f"after hold={params.alpha_hold_epochs}, ramp={params.alpha_schedule_epochs} epochs"
+    )
+    print(
+        "coordinate_embed : "
+        f"dim={params.coordinate_embedding_dim}, "
+        f"trainable={params.coordinate_embedding_trainable}"
+    )
     print(f"lambda_soft_pseudo_edge: {params.lambda_soft_pseudo_edge}")
     print(f"pseudo_edge_target: mode={params.pseudo_score_mode}, static_target={params.pseudo_use_static_target}, geo_tau={params.pseudo_geo_tau}, temporal_weight={params.pseudo_temporal_weight}, candidate_k={params.pseudo_candidate_k}, topk={params.pseudo_topk}, include_mst={params.pseudo_include_mst}, max_lag={params.pseudo_max_lag}, partial_ridge={params.pseudo_partial_ridge}")
     print(f"select_best_by   : {params.select_best_by}")
@@ -902,7 +937,10 @@ def main() -> None:
         print(
             "    Bridge candidates use only S_dynamic evidence gated by relative geometric length; no GT edges."
         )
-    print("  Checkpoint selection can use J_obs = alpha*MSE_val + (1-alpha)*L_topology_val; no GT edges.")
+    print(
+        "  Checkpoint selection uses the final alpha: "
+        "J_obs = alpha_end*MSE_val + (1-alpha_end)*L_topology_val; no GT edges."
+    )
     print("  Change in this strategy: minimal direct weak edge classification on observable pseudo-target Q.")
     print("==========================================")
 

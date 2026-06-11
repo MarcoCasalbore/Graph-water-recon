@@ -26,6 +26,8 @@ water-like benchmarks:
 The latest strict GT-free proxy study reaches held-out topology F1 around
 `0.71-0.80` without using the true edge count. See
 [docs/PROXY_METHODOLOGY_STUDY.md](docs/PROXY_METHODOLOGY_STUDY.md).
+The direct proxy-landscape stress test is in
+[docs/PROXY_LANDSCAPE_DIAGNOSTIC.md](docs/PROXY_LANDSCAPE_DIAGNOSTIC.md).
 
 Older diagnostic sweeps can reach higher F1, but those are documented as
 diagnostics only because the decoder setting was selected after looking at

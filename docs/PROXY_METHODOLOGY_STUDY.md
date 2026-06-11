@@ -166,3 +166,8 @@ a trained DGM will preserve the proxy ranking in its learned probabilities.
 The next controlled experiment is therefore a small DGM ablation comparing the
 old `geo_global_dynamic_proxy` with the frozen pressure-smooth/geometric-rank
 target, while keeping the loss formula and observable decoder unchanged.
+
+The subsequent controlled edge-substitution analysis is documented in
+[PROXY_LANDSCAPE_DIAGNOSTIC.md](PROXY_LANDSCAPE_DIAGNOSTIC.md). It rejects a
+pairwise conditional-gain term, finds a modest benefit from geometrically gated
+demand VAR, and shows that the next missing evidence is likely graph-level.

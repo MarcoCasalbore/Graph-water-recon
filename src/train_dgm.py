@@ -227,7 +227,8 @@ def _build_pseudo_edge_target(dist, x_flat, hparams, device):
     n = dist.shape[0]
     eye = torch.eye(n, device=device, dtype=torch.bool)
 
-    if bool(getattr(hparams, "pseudo_use_static_target", False)):
+    mode = str(getattr(hparams, "pseudo_score_mode", "geo_temporal"))
+    if bool(getattr(hparams, "pseudo_use_static_target", False)) or mode.startswith("observable_"):
         return _build_static_pseudo_edge_target(
             dist=dist,
             hparams=hparams,
@@ -428,7 +429,44 @@ def _build_static_pseudo_edge_target(dist, hparams, device):
 
     prebuilt_target = None
 
-    if mode == "geo_only":
+    if mode in {"observable_geometry", "observable_geometry_plus", "observable_expert_pressure", "observable_expert_dynamic", "observable_expert_full", "observable_electric_voltage", "observable_electric_dynamic", "observable_electric_grid", "observable_electric_inverse", "observable_electric_full"}:
+        geo_rank = _geometry_rank_affinity(dist)
+        geometry = geo_rank
+        if mode not in {"observable_geometry"}:
+            geometry = _offdiag_minmax(geo_rank * _nonmediated_geometry_affinity(dist))
+        if mode in {"observable_geometry", "observable_geometry_plus"}:
+            score = geometry
+        else:
+            pressure_smooth = _pressure_smooth_affinity(pressure)
+            if demand is None:
+                demand_global = _global_var_affinity(pressure, ridge=float(getattr(hparams, "pseudo_partial_ridge", 0.05)))
+                pressure_from_demand = demand_global
+            else:
+                demand_global = _global_var_affinity(demand, ridge=float(getattr(hparams, "pseudo_partial_ridge", 0.05)))
+                pressure_from_demand = _global_cross_var_affinity(
+                    source=demand,
+                    target=pressure,
+                    ridge=float(getattr(hparams, "pseudo_partial_ridge", 0.05)),
+                )
+            dynamics = _offdiag_minmax(torch.maximum(demand_global, pressure_from_demand))
+            if mode in {"observable_expert_pressure", "observable_electric_voltage"}:
+                score = _offdiag_minmax(geometry * pressure_smooth)
+            elif mode == "observable_expert_dynamic":
+                score = _offdiag_minmax(geometry * dynamics)
+            elif mode == "observable_electric_dynamic":
+                score = _offdiag_minmax(geometry * pressure_smooth * dynamics)
+            elif mode == "observable_electric_grid":
+                backbone = _geometric_backbone_affinity(dist)
+                score = _offdiag_minmax(geometry * pressure_smooth * dynamics * (0.65 + 0.35 * backbone))
+            elif mode in {"observable_electric_inverse", "observable_electric_full"}:
+                inverse_response = _inverse_source_target_affinity(demand if demand is not None else pressure, pressure, ridge=float(getattr(hparams, "pseudo_partial_ridge", 0.05)))
+                if mode == "observable_electric_inverse":
+                    score = _offdiag_minmax(geometry * inverse_response)
+                else:
+                    score = _offdiag_minmax(geometry * pressure_smooth * inverse_response)
+            else:
+                score = _offdiag_minmax(geometry * pressure_smooth * dynamics)
+    elif mode == "geo_only":
         score = geo_affinity
     elif mode == "demand_corr" and demand is not None:
         score = _positive_corr_affinity(demand)
@@ -626,6 +664,49 @@ def _offdiag_minmax(score):
     return score
 
 
+def _geometry_rank_affinity(dist):
+    n = dist.shape[0]
+    eye = torch.eye(n, device=dist.device, dtype=torch.bool)
+    work = dist.detach().clone().masked_fill(eye, float("inf"))
+    order = torch.argsort(work, dim=1)
+    ranks = torch.empty_like(order, dtype=dist.dtype)
+    rank_values = torch.arange(n, device=dist.device, dtype=dist.dtype).view(1, n).expand(n, n)
+    ranks.scatter_(1, order, rank_values)
+    score = 1.0 / (1.0 + ranks)
+    score = 0.5 * (score + score.t())
+    return _offdiag_minmax(score.masked_fill(eye, 0.0))
+
+
+def _geometric_backbone_affinity(dist):
+    """Observable hub/backbone plausibility from coordinates only."""
+    n = dist.shape[0]
+    eye = torch.eye(n, device=dist.device, dtype=torch.bool)
+    work = dist.detach().clone().masked_fill(eye, float("inf"))
+    finite = work[torch.isfinite(work)]
+    if finite.numel() == 0:
+        return torch.zeros_like(dist)
+    closeness = 1.0 / (work.mean(dim=1) + 1e-12)
+    closeness = (closeness - closeness.min()) / (closeness.max() - closeness.min() + 1e-12)
+    moderate = torch.exp(-torch.abs(work - torch.quantile(finite, 0.35)) / (torch.std(finite) + 1e-12))
+    hub_pair = torch.maximum(closeness[:, None], closeness[None, :])
+    return _offdiag_minmax(hub_pair * moderate)
+
+
+def _nonmediated_geometry_affinity(dist):
+    n = dist.shape[0]
+    out = torch.zeros_like(dist)
+    with torch.no_grad():
+        for i in range(n):
+            for j in range(i + 1, n):
+                witness = torch.maximum(dist[i], dist[j]) < (dist[i, j] - 1e-12)
+                witness[i] = False
+                witness[j] = False
+                if not bool(witness.any()):
+                    out[i, j] = 1.0
+                    out[j, i] = 1.0
+    return 0.25 + 0.75 * out
+
+
 def _standardize_time(x):
     return (x - x.mean(dim=0, keepdim=True)) / (x.std(dim=0, keepdim=True) + 1e-12)
 
@@ -710,6 +791,23 @@ def _partial_corr_affinity(x, ridge):
     return _offdiag_minmax(torch.relu(pcorr))
 
 
+def _inverse_source_target_affinity(source, target, ridge):
+    """Inverse response score from observable source changes to target changes."""
+    if source is None or target is None or source.shape[0] < 3:
+        n = target.shape[1]
+        return torch.zeros((n, n), device=target.device, dtype=target.dtype)
+    source_diff = _standardize_time(source[1:] - source[:-1])
+    target_diff = _standardize_time(target[1:] - target[:-1])
+    n = target.shape[1]
+    eye = torch.eye(n, device=target.device, dtype=target.dtype)
+    gram = source_diff.t().matmul(source_diff) + float(ridge) * eye
+    response = torch.linalg.pinv(gram).matmul(source_diff.t().matmul(target_diff))
+    inverse = torch.linalg.pinv(response)
+    score = torch.maximum(torch.abs(inverse), torch.abs(inverse).t())
+    score = score.masked_fill(torch.eye(n, device=target.device, dtype=torch.bool), 0.0)
+    return _offdiag_minmax(score)
+
+
 def _global_var_affinity(x, ridge):
     """Off-diagonal coefficients of X[t+1] = X[t] B, no GT edges."""
     if x is None or x.shape[0] < 2:
@@ -720,7 +818,8 @@ def _global_var_affinity(x, ridge):
     target = z[1:]
     n = source.shape[1]
     eye = torch.eye(n, device=x.device, dtype=x.dtype)
-    coef = torch.linalg.solve(source.t().matmul(source) + float(ridge) * eye, source.t().matmul(target))
+    gram = source.t().matmul(source) + float(ridge) * eye
+    coef = torch.linalg.pinv(gram).matmul(source.t().matmul(target))
     score = torch.maximum(torch.abs(coef), torch.abs(coef).t())
     score = score.masked_fill(eye.bool(), 0.0)
     return _offdiag_minmax(score)
@@ -737,7 +836,8 @@ def _global_cross_var_affinity(source, target, ridge):
     design = torch.cat([target_z[:-1], source_z[:-1]], dim=1)
     y = target_z[1:]
     eye = torch.eye(2 * n, device=target.device, dtype=target.dtype)
-    coef = torch.linalg.solve(design.t().matmul(design) + float(ridge) * eye, design.t().matmul(y))
+    gram = design.t().matmul(design) + float(ridge) * eye
+    coef = torch.linalg.pinv(gram).matmul(design.t().matmul(y))
     source_to_target = torch.abs(coef[n:, :])
     score = torch.maximum(source_to_target, source_to_target.t())
     score = score.masked_fill(torch.eye(n, device=target.device, dtype=torch.bool), 0.0)
@@ -1149,11 +1249,21 @@ def _compute_topology_proxy_score(model, val_loader, device, hparams):
     }
 
 
+def _pointwise_forecast_loss(pred, true, loss_type: str, huber_delta: float):
+    if loss_type == "mae":
+        return torch.abs(pred - true).mean()
+    if loss_type == "huber":
+        return F.huber_loss(pred, true, delta=float(huber_delta))
+    return F.mse_loss(pred, true)
+
+
 def _forecasting_loss_ctown(y_predicted, y_true, hparams):
-    """
-    Weighted MSE on normalized targets:
-      feature 0 -> pressure
-      feature 1 -> demand
+    """Forecast loss with optional per-feature scale normalization.
+
+    The reported pressure/demand losses stay on the original normalized data
+    scale. The optimized task loss can additionally divide each feature by an
+    observed target scale so that pressure and demand do not dominate only
+    because their numeric variance differs.
     """
     H = int(hparams.prediction_window)
     Fout = int(getattr(hparams, "output_features", 2))
@@ -1167,14 +1277,51 @@ def _forecasting_loss_ctown(y_predicted, y_true, hparams):
     d_pred = y_pred[:, :, 1]
     d_true = y_true[:, :, 1]
 
+    loss_type = str(getattr(hparams, "task_loss_type", "mse"))
+    huber_delta = _get_float_attr(hparams, "task_huber_delta", 1.0)
+    task_target = str(getattr(hparams, "task_target", "all"))
+    combine = str(getattr(hparams, "task_feature_combine", "weighted_sum"))
+    normalization = str(getattr(hparams, "task_feature_normalization", "none"))
+
     wp = _get_float_attr(hparams, "pressure_weight", 1.0)
     wd = _get_float_attr(hparams, "demand_weight", 1.0)
 
-    loss_p = F.mse_loss(p_pred, p_true)
-    loss_d = F.mse_loss(d_pred, d_true)
-    loss = wp * loss_p + wd * loss_d
+    raw_loss_p = _pointwise_forecast_loss(p_pred, p_true, loss_type, huber_delta)
+    raw_loss_d = _pointwise_forecast_loss(d_pred, d_true, loss_type, huber_delta)
 
-    return loss, float(loss_p.detach().item()), float(loss_d.detach().item())
+    if normalization == "target_std":
+        p_scale = p_true.detach().std().clamp_min(1e-6)
+        d_scale = d_true.detach().std().clamp_min(1e-6)
+        p_pred_loss = p_pred / p_scale
+        p_true_loss = p_true / p_scale
+        d_pred_loss = d_pred / d_scale
+        d_true_loss = d_true / d_scale
+    elif normalization == "target_mad":
+        p_center = p_true.detach().median()
+        d_center = d_true.detach().median()
+        p_scale = (p_true.detach() - p_center).abs().median().clamp_min(1e-6)
+        d_scale = (d_true.detach() - d_center).abs().median().clamp_min(1e-6)
+        p_pred_loss = p_pred / p_scale
+        p_true_loss = p_true / p_scale
+        d_pred_loss = d_pred / d_scale
+        d_true_loss = d_true / d_scale
+    else:
+        p_pred_loss, p_true_loss = p_pred, p_true
+        d_pred_loss, d_true_loss = d_pred, d_true
+
+    loss_p = _pointwise_forecast_loss(p_pred_loss, p_true_loss, loss_type, huber_delta)
+    loss_d = _pointwise_forecast_loss(d_pred_loss, d_true_loss, loss_type, huber_delta)
+
+    if task_target == "pressure":
+        loss = loss_p
+    elif task_target == "demand":
+        loss = loss_d
+    elif combine == "weighted_mean":
+        loss = (wp * loss_p + wd * loss_d) / max(1e-12, wp + wd)
+    else:
+        loss = wp * loss_p + wd * loss_d
+
+    return loss, float(raw_loss_p.detach().item()), float(raw_loss_d.detach().item())
 
 
 
@@ -1378,22 +1525,22 @@ def train_one_epoch(model, dataloader, optimizer, device, hparams):
                 hparams=hparams,
             )
 
-        topology_loss = (
-            loss_soft_topology
-            + lam_stability * loss_stability
-        )
+        topology_loss = loss_soft_topology
+        stability_term = lam_stability * loss_stability
 
         if use_complementary_loss:
             alpha = max(0.0, min(1.0, alpha_forecast))
             loss_total = (
                 alpha * (loss_forecasting + lam_graph * graph_loss)
                 + (1.0 - alpha) * topology_loss
+                + stability_term
             )
         else:
             loss_total = (
                 loss_forecasting
                 + lam_graph * graph_loss
-                + lam_stability * loss_stability
+                + topology_loss
+                + stability_term
             )
 
         loss_total.backward()
@@ -1490,7 +1637,7 @@ def evaluate(model, dataloader, device, hparams, split="val"):
         loss_soft_topology, topology_debug = _compute_soft_topology_loss(
             model, batch, device, hparams, x_flat=x
         )
-        topology_loss = loss_soft_topology + lam_stability * loss_stability
+        topology_loss = loss_soft_topology
 
         running_mse += float(loss_forecasting.detach().item())
         running_pressure_mse += loss_pressure
@@ -1691,7 +1838,9 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
                 stats.get("soft_pseudo_edge_loss", 0.0),
             )
         )
-        return alpha * mse + (1.0 - alpha) * topology
+        stability = float(stats.get("stability_loss", 0.0))
+        lam_stability = _get_float_attr(hparams, "lambda_stability", 0.0)
+        return alpha * mse + (1.0 - alpha) * topology + lam_stability * stability
 
     # --- keep best validation snapshots in memory ---
     best_state_dict = None

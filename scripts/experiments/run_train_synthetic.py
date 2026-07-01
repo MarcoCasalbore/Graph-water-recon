@@ -1,4 +1,4 @@
-"""Train DGM on the controlled synthetic water-like benchmark."""
+﻿"""Train DGM on the controlled synthetic water-like benchmark."""
 
 from __future__ import annotations
 
@@ -340,15 +340,15 @@ def configure_run(args: argparse.Namespace) -> Parameters:
     params.loss_plot_path = str(args.out_dir / "loss_curve.png")
 
     params.graph_detach_input = False
-    params.model = "dgm_gcn"
-    params.ffun = "gcn"
-    params.gfun = "gcn"
+    params.model = f"dgm_{args.ffun}_{args.gfun}"
+    params.ffun = args.ffun
+    params.gfun = args.gfun
     params.distance = "euclidean"
 
     params.num_nodes = args.num_nodes
     params.lags = args.lags
     params.stride = args.stride
-    params.prediction_window = 1
+    params.prediction_window = args.prediction_window
     params.batch_size = args.batch_size
     params.max_epochs = args.max_epochs
     params.check_val_every_n_epoch = args.check_val_every_n_epoch
@@ -412,8 +412,13 @@ def configure_run(args: argparse.Namespace) -> Parameters:
     params.soft_degree_target = args.soft_degree_target
     params.max_degree_target = 4
 
-    params.pressure_weight = 1.0
-    params.demand_weight = 1.0
+    params.task_loss_type = args.task_loss_type
+    params.task_huber_delta = args.task_huber_delta
+    params.task_target = args.task_target
+    params.task_feature_combine = args.task_feature_combine
+    params.task_feature_normalization = args.task_feature_normalization
+    params.pressure_weight = args.pressure_weight
+    params.demand_weight = args.demand_weight
     return params
 
 
@@ -594,6 +599,7 @@ def export_soft_probability_graph(
     model.eval()
 
     prob_sum = torch.zeros((params.num_nodes, params.num_nodes), dtype=torch.float64)
+    prob_sq_sum = torch.zeros((params.num_nodes, params.num_nodes), dtype=torch.float64)
     n_blocks = 0
 
     with torch.no_grad():
@@ -607,17 +613,25 @@ def export_soft_probability_graph(
             for gf in getattr(model, "graph_f", []):
                 logits = getattr(gf, "last_logits", None)
                 for prob in _local_probability_blocks(logits, int(params.num_nodes)):
-                    prob_sum += prob.detach().cpu().double()
+                    prob_cpu = prob.detach().cpu().double()
+                    prob_sum += prob_cpu
+                    prob_sq_sum += prob_cpu * prob_cpu
                     n_blocks += 1
 
     if n_blocks == 0:
         raise RuntimeError("No DGM probability blocks were available for soft graph export.")
 
     prob = prob_sum / float(n_blocks)
+    var = torch.clamp(prob_sq_sum / float(n_blocks) - prob * prob, min=0.0)
+    prob_std = torch.sqrt(var)
     score = 0.5 * (prob + prob.T)
+    score_std = 0.5 * (prob_std + prob_std.T)
     score.fill_diagonal_(0.0)
+    score_std.fill_diagonal_(0.0)
     if score_out_path is not None:
         np.save(score_out_path, score.numpy())
+        np.save(score_out_path.with_name("dgm_prob_mean.npy"), score.numpy())
+        np.save(score_out_path.with_name("dgm_prob_std.npy"), score_std.numpy())
 
     edges: list[tuple[int, int]] = []
     score_dict: dict[tuple[int, int], float] = {}
@@ -767,12 +781,25 @@ def main() -> None:
     parser.add_argument("--regenerate", action="store_true")
     parser.add_argument("--num_nodes", type=int, default=50)
     parser.add_argument("--lags", type=int, default=24)
+    parser.add_argument("--prediction_window", type=int, default=1)
     parser.add_argument("--stride", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--max_epochs", type=int, default=20)
     parser.add_argument("--check_val_every_n_epoch", type=int, default=2)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--k", type=int, default=2)
+    parser.add_argument(
+        "--ffun",
+        choices=["gcn", "gat", "mlp", "knn", "gcn1d", "gcn1d-big", "gConvLSTM", "gConvGRU"],
+        default="gcn",
+        help="Network used inside the DGM edge-probability module.",
+    )
+    parser.add_argument(
+        "--gfun",
+        choices=["gcn", "gat", "edgeconv", "gcn1d", "gcn1d-big", "gConvLSTM", "gConvGRU"],
+        default="gcn",
+        help="Message-passing module used after DGM edge sampling.",
+    )
     parser.add_argument("--lambda_graph", type=float, default=1e-2)
     parser.add_argument("--lambda_stability", type=float, default=0.0)
     parser.add_argument("--use_complementary_loss", action="store_true")
@@ -784,6 +811,13 @@ def main() -> None:
         help="Number of ramp epochs from alpha start to alpha end.",
     )
     parser.add_argument("--alpha_hold_epochs", type=int, default=0)
+    parser.add_argument("--task_loss_type", choices=["mse", "mae", "huber"], default="mse")
+    parser.add_argument("--task_huber_delta", type=float, default=1.0)
+    parser.add_argument("--task_target", choices=["all", "pressure", "demand"], default="all")
+    parser.add_argument("--task_feature_combine", choices=["weighted_sum", "weighted_mean"], default="weighted_sum")
+    parser.add_argument("--task_feature_normalization", choices=["none", "target_std", "target_mad"], default="none")
+    parser.add_argument("--pressure_weight", type=float, default=1.0)
+    parser.add_argument("--demand_weight", type=float, default=1.0)
     parser.add_argument("--coordinate_embedding_dim", type=int, default=0)
     parser.add_argument(
         "--coordinate_embedding_trainable",
@@ -811,6 +845,16 @@ def main() -> None:
             "global_dynamic_proxy",
             "geo_global_dynamic_proxy",
             "geo_global_dynamic_bridge_proxy",
+            "observable_geometry",
+            "observable_geometry_plus",
+            "observable_expert_pressure",
+            "observable_expert_dynamic",
+            "observable_expert_full",
+            "observable_electric_voltage",
+            "observable_electric_dynamic",
+            "observable_electric_grid",
+            "observable_electric_inverse",
+            "observable_electric_full",
         ],
         default="geo_temporal",
     )
@@ -876,6 +920,7 @@ def main() -> None:
     print(f"lags              : {params.lags}")
     print(f"stride            : {params.stride}")
     print(f"k                 : {params.k}")
+    print(f"dgm_modules       : ffun={params.ffun}, gfun={params.gfun}")
     print(f"lambda_graph      : {params.lambda_graph}")
     print(f"lambda_stability  : {params.lambda_stability}")
     print(f"complementary_loss: {params.use_complementary_loss}")
@@ -898,7 +943,7 @@ def main() -> None:
     print("LOSS FORMULA")
     if params.use_complementary_loss:
         print(
-            "  L = alpha * L_forecast + (1-alpha) * (lambda_Q * L_Q + lambda_stability * L_stability)"
+            "  L = alpha * L_forecast + (1-alpha) * L_Q + lambda_stability * L_stability"
         )
     else:
         print(
@@ -939,7 +984,7 @@ def main() -> None:
         )
     print(
         "  Checkpoint selection uses the final alpha: "
-        "J_obs = alpha_end*MSE_val + (1-alpha_end)*L_topology_val; no GT edges."
+        "J_obs = alpha_end*MSE_val + (1-alpha_end)*L_Q_val + lambda_stability*L_stability_val; no GT edges."
     )
     print("  Change in this strategy: minimal direct weak edge classification on observable pseudo-target Q.")
     print("==========================================")

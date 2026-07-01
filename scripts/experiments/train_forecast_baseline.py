@@ -19,21 +19,37 @@ from torch.utils.data import DataLoader, TensorDataset
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def make_windows(series: np.ndarray, start: int, end: int, lags: int) -> tuple[np.ndarray, np.ndarray]:
+def make_windows(
+    series: np.ndarray,
+    start: int,
+    end: int,
+    lags: int,
+    prediction_window: int,
+) -> tuple[np.ndarray, np.ndarray]:
     x_rows = []
     y_rows = []
     first = max(start + lags, lags)
-    for t in range(first, end):
+    last = end - prediction_window
+    for t in range(first, last + 1):
         x_rows.append(series[t - lags : t])
-        y_rows.append(series[t])
+        y_rows.append(series[t : t + prediction_window])
     return np.asarray(x_rows, dtype=np.float32), np.asarray(y_rows, dtype=np.float32)
 
 
 class GlobalGRU(nn.Module):
-    def __init__(self, num_nodes: int, features: int, hidden: int, layers: int, dropout: float) -> None:
+    def __init__(
+        self,
+        num_nodes: int,
+        features: int,
+        hidden: int,
+        layers: int,
+        dropout: float,
+        prediction_window: int,
+    ) -> None:
         super().__init__()
         self.num_nodes = num_nodes
         self.features = features
+        self.prediction_window = prediction_window
         self.gru = nn.GRU(
             input_size=num_nodes * features,
             hidden_size=hidden,
@@ -44,31 +60,33 @@ class GlobalGRU(nn.Module):
         self.head = nn.Sequential(
             nn.Linear(hidden, hidden),
             nn.ReLU(),
-            nn.Linear(hidden, num_nodes * features),
+            nn.Linear(hidden, prediction_window * num_nodes * features),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch, lags, nodes, features = x.shape
         out, _ = self.gru(x.reshape(batch, lags, nodes * features))
         y = self.head(out[:, -1])
-        return y.reshape(batch, nodes, features)
+        return y.reshape(batch, self.prediction_window, nodes, features)
 
 
 class NodeMLP(nn.Module):
-    def __init__(self, lags: int, features: int, hidden: int) -> None:
+    def __init__(self, lags: int, features: int, hidden: int, prediction_window: int) -> None:
         super().__init__()
+        self.prediction_window = prediction_window
+        self.features = features
         self.net = nn.Sequential(
             nn.Linear(lags * features, hidden),
             nn.ReLU(),
             nn.Linear(hidden, hidden),
             nn.ReLU(),
-            nn.Linear(hidden, features),
+            nn.Linear(hidden, prediction_window * features),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch, lags, nodes, features = x.shape
         y = self.net(x.permute(0, 2, 1, 3).reshape(batch * nodes, lags * features))
-        return y.reshape(batch, nodes, features)
+        return y.reshape(batch, nodes, self.prediction_window, self.features).permute(0, 2, 1, 3)
 
 
 def metrics(pred: np.ndarray, true: np.ndarray) -> dict[str, float]:
@@ -83,8 +101,8 @@ def metrics(pred: np.ndarray, true: np.ndarray) -> dict[str, float]:
         "rmse": rmse,
         "mae": mae,
         "mape": mape,
-        "pressure_mse": float(np.mean(err[:, :, 0] ** 2)),
-        "demand_mse": float(np.mean(err[:, :, 1] ** 2)),
+        "pressure_mse": float(np.mean(err[..., 0] ** 2)),
+        "demand_mse": float(np.mean(err[..., 1] ** 2)),
     }
 
 
@@ -117,6 +135,7 @@ def main() -> None:
     parser.add_argument("--out_dir", type=Path, required=True)
     parser.add_argument("--model", choices=["global_gru", "node_mlp"], default="global_gru")
     parser.add_argument("--lags", type=int, default=24)
+    parser.add_argument("--prediction_window", type=int, default=1)
     parser.add_argument("--epochs", type=int, default=80)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--hidden", type=int, default=128)
@@ -139,9 +158,15 @@ def main() -> None:
     std = (train_chunk.std(axis=(0, 1), keepdims=True) + 1e-8).astype(np.float32)
     series = (series_raw - mean) / std
 
-    x_train, y_train = make_windows(series, splits["train"]["start"], splits["train"]["end"], args.lags)
-    x_val, y_val = make_windows(series, splits["val"]["start"], splits["val"]["end"], args.lags)
-    x_test, y_test = make_windows(series, splits["test"]["start"], splits["test"]["end"], args.lags)
+    x_train, y_train = make_windows(
+        series, splits["train"]["start"], splits["train"]["end"], args.lags, args.prediction_window
+    )
+    x_val, y_val = make_windows(
+        series, splits["val"]["start"], splits["val"]["end"], args.lags, args.prediction_window
+    )
+    x_test, y_test = make_windows(
+        series, splits["test"]["start"], splits["test"]["end"], args.lags, args.prediction_window
+    )
 
     train_loader = DataLoader(
         TensorDataset(torch.tensor(x_train), torch.tensor(y_train)),
@@ -154,9 +179,9 @@ def main() -> None:
     num_nodes = series.shape[1]
     features = series.shape[2]
     if args.model == "global_gru":
-        model = GlobalGRU(num_nodes, features, args.hidden, args.layers, args.dropout)
+        model = GlobalGRU(num_nodes, features, args.hidden, args.layers, args.dropout, args.prediction_window)
     else:
-        model = NodeMLP(args.lags, features, args.hidden)
+        model = NodeMLP(args.lags, features, args.hidden, args.prediction_window)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -192,6 +217,7 @@ def main() -> None:
         "model": args.model,
         "data_dir": str(args.data_dir),
         "lags": args.lags,
+        "prediction_window": args.prediction_window,
         "epochs": args.epochs,
         "hidden": args.hidden,
         "layers": args.layers,

@@ -1,0 +1,97 @@
+{
+  "name": "simbench_electric",
+  "dataset_id": "electric_simple",
+  "simbench_code": "1-LV-semiurb4--0-sw",
+  "num_nodes": 44,
+  "num_gt_undirected_edges": 43,
+  "num_initial_undirected_edges": 79,
+  "node_ids": [
+    "LV4.101 Bus 1",
+    "LV4.101 Bus 35",
+    "LV4.101 Bus 14",
+    "LV4.101 Bus 22",
+    "LV4.101 Bus 4",
+    "LV4.101 Bus 16",
+    "LV4.101 Bus 25",
+    "LV4.101 Bus 26",
+    "LV4.101 Bus 9",
+    "LV4.101 Bus 21",
+    "LV4.101 Bus 29",
+    "LV4.101 Bus 12",
+    "LV4.101 Bus 23",
+    "LV4.101 Bus 31",
+    "LV4.101 Bus 32",
+    "LV4.101 Bus 33",
+    "LV4.101 Bus 17",
+    "LV4.101 Bus 28",
+    "LV4.101 Bus 2",
+    "LV4.101 Bus 3",
+    "LV4.101 Bus 5",
+    "LV4.101 Bus 6",
+    "LV4.101 Bus 7",
+    "LV4.101 Bus 24",
+    "LV4.101 Bus 34",
+    "LV4.101 Bus 10",
+    "LV4.101 Bus 11",
+    "LV4.101 Bus 13",
+    "LV4.101 Bus 15",
+    "LV4.101 Bus 30",
+    "LV4.101 Bus 8",
+    "LV4.101 Bus 18",
+    "LV4.101 Bus 19",
+    "LV4.101 Bus 20",
+    "LV4.101 Bus 36",
+    "LV4.101 Bus 37",
+    "LV4.101 Bus 38",
+    "LV4.101 Bus 39",
+    "LV4.101 Bus 40",
+    "LV4.101 Bus 41",
+    "LV4.101 Bus 42",
+    "LV4.101 Bus 43",
+    "LV4.101 Bus 44",
+    "MV1.101 Bus 52"
+  ],
+  "splits": {
+    "train": {
+      "start": 0,
+      "end": 503
+    },
+    "val": {
+      "start": 503,
+      "end": 612
+    },
+    "test": {
+      "start": 612,
+      "end": 720
+    }
+  },
+  "compatibility_mapping": {
+    "pressure": "voltage_pu",
+    "demand": "net_p_mw"
+  },
+  "allowed_for_training": [
+    "node_xy",
+    "voltage_pu / pressure",
+    "net_p_mw / demand",
+    "p_load_mw",
+    "q_load_mvar",
+    "p_sgen_mw",
+    "q_sgen_mvar",
+    "net_q_mvar"
+  ],
+  "posthoc_only": [
+    "edge_index",
+    "line / trafo / switch connectivity",
+    "line impedances",
+    "line lengths",
+    "number of ground-truth edges"
+  ],
+  "generator": {
+    "source": "SimBench + pandapower power flow",
+    "timesteps": 720,
+    "profile_stride": 4,
+    "profile_start": 0,
+    "initial_knn": 3,
+    "converged_steps": 720
+  }
+}

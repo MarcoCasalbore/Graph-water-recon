@@ -39,11 +39,18 @@ from run_proxy_methodology_study import geometry_scores, graph_from_score, minma
 
 
 class FixedGraphForecaster(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, dropout: float = 0.0):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        dropout: float = 0.0,
+        add_self_loops: bool = True,
+    ):
         super().__init__()
         self.input_proj = nn.Linear(input_dim, hidden_dim)
-        self.conv1 = GCNConv(hidden_dim, hidden_dim)
-        self.conv2 = GCNConv(hidden_dim, hidden_dim)
+        self.conv1 = GCNConv(hidden_dim, hidden_dim, add_self_loops=add_self_loops)
+        self.conv2 = GCNConv(hidden_dim, hidden_dim, add_self_loops=add_self_loops)
         self.output = nn.Linear(hidden_dim, output_dim)
         self.dropout = float(dropout)
 
@@ -164,6 +171,7 @@ def train_one_graph(name: str, edges: set[tuple[int, int]], loaders, params, arg
         hidden_dim=args.hidden_dim,
         output_dim=params.prediction_window * params.output_features,
         dropout=args.dropout,
+        add_self_loops=not args.disable_self_loops,
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
@@ -254,6 +262,12 @@ def main() -> None:
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--lags", type=int, default=24)
+    parser.add_argument("--prediction_window", type=int, default=1)
+    parser.add_argument(
+        "--disable_self_loops",
+        action="store_true",
+        help="Diagnostic topology-sensitive mode: nodes cannot forecast from their own history through GCN self-loops.",
+    )
     parser.add_argument("--knn_k", type=int, default=6)
     parser.add_argument("--random_repeats", type=int, default=2)
     parser.add_argument("--proxy_row_k", type=int, default=3)
@@ -283,7 +297,7 @@ def main() -> None:
     params.meta_json = str(meta_json)
     params.num_nodes = num_nodes
     params.lags = args.lags
-    params.prediction_window = 1
+    params.prediction_window = args.prediction_window
     params.input_features = 2
     params.output_features = 2
     params.pressure_weight = 1.0

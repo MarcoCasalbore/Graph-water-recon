@@ -1,13 +1,15 @@
-einops>=0.8
+﻿einops>=0.8
 h5py>=3.11
 matplotlib>=3.8
 networkx>=3.2
 numpy>=1.26
 pandas>=2.2
+pandapower>=3.4
 pillow>=10.0
 requests>=2.31
 scikit-learn>=1.4
 scipy>=1.12
+simbench>=1.6
 torch>=2.3
 torch-geometric>=2.5
 tqdm>=4.66

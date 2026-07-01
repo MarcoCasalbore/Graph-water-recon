@@ -32,6 +32,12 @@ VARIANTS = [
 ]
 
 
+BENCHMARK_PROFILES = {
+    "legacy": {"lags": 24, "prediction_window": 1, "disable_self_loops_in_oracle": False},
+    "topology_sensitive": {"lags": 6, "prediction_window": 12, "disable_self_loops_in_oracle": True},
+}
+
+
 def run(cmd: list[str], dry_run: bool) -> None:
     print("\n$ " + " ".join(cmd))
     if not dry_run:
@@ -43,11 +49,21 @@ def main() -> None:
     parser.add_argument("--datasets", default="simple,water_base,water_bridges,water_loopy")
     parser.add_argument("--variants", default="a005_q2_mst,a002_q2_mst,a010_q2_mst,a005_q3_mst")
     parser.add_argument("--epochs", type=int, default=90)
+    parser.add_argument("--benchmark_profile", choices=sorted(BENCHMARK_PROFILES), default="legacy")
+    parser.add_argument("--lags", type=int, default=None)
+    parser.add_argument("--prediction_window", type=int, default=None)
     parser.add_argument("--out_root", type=Path, default=PROJECT_ROOT / "outputs" / "final_suite")
     parser.add_argument("--dry_run", action="store_true")
     parser.add_argument("--skip_dgm", action="store_true")
     parser.add_argument("--skip_baselines", action="store_true")
+    parser.add_argument("--skip_oracle", action="store_true")
+    parser.add_argument("--oracle_epochs", type=int, default=20)
     args = parser.parse_args()
+
+    profile = dict(BENCHMARK_PROFILES[args.benchmark_profile])
+    lags = profile["lags"] if args.lags is None else args.lags
+    prediction_window = profile["prediction_window"] if args.prediction_window is None else args.prediction_window
+    disable_self_loops_in_oracle = bool(profile["disable_self_loops_in_oracle"])
 
     args.out_root.mkdir(parents=True, exist_ok=True)
     selected_datasets = [name.strip() for name in args.datasets.split(",") if name.strip()]
@@ -58,6 +74,10 @@ def main() -> None:
         "datasets": selected_datasets,
         "variants": variants,
         "epochs": args.epochs,
+        "benchmark_profile": args.benchmark_profile,
+        "lags": lags,
+        "prediction_window": prediction_window,
+        "oracle_disable_self_loops": disable_self_loops_in_oracle,
     }
     (args.out_root / "suite_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
@@ -82,6 +102,10 @@ def main() -> None:
                     "5",
                     "--batch_size",
                     "32",
+                    "--lags",
+                    str(lags),
+                    "--prediction_window",
+                    str(prediction_window),
                     "--k",
                     "2",
                     "--static_top_edges",
@@ -147,6 +171,25 @@ def main() -> None:
                     args.dry_run,
                 )
 
+        if not args.skip_oracle:
+            oracle_cmd = [
+                sys.executable,
+                "scripts/diagnostics/oracle_graph_loss_test.py",
+                "--data_dir",
+                data_dir,
+                "--out_dir",
+                str(args.out_root / f"{dataset_name}_oracle_{args.benchmark_profile}"),
+                "--epochs",
+                str(args.oracle_epochs),
+                "--lags",
+                str(lags),
+                "--prediction_window",
+                str(prediction_window),
+            ]
+            if disable_self_loops_in_oracle:
+                oracle_cmd.append("--disable_self_loops")
+            run(oracle_cmd, args.dry_run)
+
         if not args.skip_baselines:
             for baseline in ["global_gru", "node_mlp"]:
                 run(
@@ -159,6 +202,10 @@ def main() -> None:
                         str(args.out_root / f"{dataset_name}_forecast_{baseline}"),
                         "--model",
                         baseline,
+                        "--lags",
+                        str(lags),
+                        "--prediction_window",
+                        str(prediction_window),
                         "--epochs",
                         "100",
                         "--hidden",

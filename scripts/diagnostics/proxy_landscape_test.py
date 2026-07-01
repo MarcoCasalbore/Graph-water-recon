@@ -109,6 +109,19 @@ def inverse_demand_pressure_response(pressure: np.ndarray, demand: np.ndarray, r
     return minmax_offdiag(score)
 
 
+def backbone_score(xy: np.ndarray) -> np.ndarray:
+    dist = np.sqrt(((xy[:, None, :] - xy[None, :, :]) ** 2).sum(axis=-1))
+    np.fill_diagonal(dist, np.nan)
+    finite = dist[np.isfinite(dist)]
+    closeness = 1.0 / (np.nanmean(dist, axis=1) + 1e-12)
+    closeness = (closeness - closeness.min()) / (closeness.max() - closeness.min() + 1e-12)
+    moderate = np.exp(-np.abs(dist - np.nanquantile(dist, 0.35)) / (np.nanstd(dist) + 1e-12))
+    score = np.maximum(closeness[:, None], closeness[None, :]) * moderate
+    score[~np.isfinite(score)] = 0.0
+    np.fill_diagonal(score, 0.0)
+    return minmax_offdiag(score)
+
+
 def score_family(xy: np.ndarray, pressure: np.ndarray, demand: np.ndarray, train_end: int, val_end: int, ridge: float) -> dict[str, np.ndarray]:
     geo_rank = geometry_scores(xy)["geo_rank"]
     smooth = smooth_score(pressure[:train_end])
@@ -117,6 +130,7 @@ def score_family(xy: np.ndarray, pressure: np.ndarray, demand: np.ndarray, train
     inverse_response = inverse_demand_pressure_response(
         pressure[:train_end], demand[:train_end], ridge
     )
+    backbone = backbone_score(xy)
     gain = conditional_pressure_gain(
         pressure[:train_end], demand[:train_end],
         pressure[train_end:val_end], demand[train_end:val_end], ridge,
@@ -141,6 +155,9 @@ def score_family(xy: np.ndarray, pressure: np.ndarray, demand: np.ndarray, train
         "geo_x_smooth_x_demand_var": geometric_mix(
             (geo_rank, 1.0), (smooth, 1.0), (demand_var, 1.0)
         ),
+        "electric_voltage": geometric_mix((geo_rank, 1.0), (smooth, 1.0)),
+        "electric_dynamic": geometric_mix((geo_rank, 1.0), (smooth, 1.0), (demand_var, 1.0)),
+        "electric_grid": geometric_mix((geo_rank, 1.0), (smooth, 1.0), (demand_var, 1.0), (backbone, 0.7)),
         "geo_x_smooth_x_inverse": geometric_mix(
             (geo_rank, 1.0), (smooth, 1.0), (inverse_response, 1.0)
         ),

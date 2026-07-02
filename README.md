@@ -46,7 +46,7 @@ The table below reports compact average topology/task results for the current re
 
 | Domain | Benchmarks | Avg task MSE | Avg F1 | Avg precision | Avg recall | Avg Eval 0.5 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Water-like | 4 | - | 0.773 | - | - | - |
+| Water-like | 3 | 0.263 | 0.783 | 0.814 | 0.756 | 0.787 |
 | Electric-like | 8 | 0.467 | 0.845 | 0.888 | 0.814 | 0.764 |
 
 `Eval 0.5` is a compact post-hoc score with equal weight on task quality and topology reconstruction. It is not used for training.
@@ -80,14 +80,18 @@ Representative electric reconstructions:
 
 ## Water Results
 
-The water branch benchmarks remain the original controlled test bed. Current work keeps the DGM training joint; two-stage experiments are treated as diagnostics only.
+Fixed setup for this water sweep:
 
-| Dataset | F1 | Notes |
-| --- | ---: | --- |
-| simple water-like graph | 0.803 | controlled simple benchmark |
-| water-branch base | 0.794 | district-like branches |
-| water-branch loopy | 0.753 | additional local loops |
-| water-branch bridges | 0.742 | longer bridge-like connections |
+- DGM modules: `gcn + gcn`
+- task loss: Huber with target normalization
+- topology prior: complete water observable/expert prior
+- decoder: stability-aware saved-probability decoder
+- GT usage: post-hoc metrics and figures only
+| Dataset | Task MSE | F1 | Precision | Recall | Eval 0.5 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `water_base` | 0.234 | 0.787 | 0.814 | 0.762 | 0.798 |
+| `water_bridges` | 0.268 | 0.800 | 0.794 | 0.806 | 0.794 |
+| `water_loopy` | 0.286 | 0.761 | 0.836 | 0.699 | 0.769 |
 
 Representative water reconstructions:
 

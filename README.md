@@ -87,6 +87,8 @@ Fixed setup for this water sweep:
 - topology prior: complete water observable/expert prior
 - decoder: stability-aware saved-probability decoder
 - GT usage: post-hoc metrics and figures only
+
+  
 | Dataset | Task MSE | F1 | Precision | Recall | Eval 0.5 |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `water_base` | 0.234 | 0.787 | 0.814 | 0.762 | 0.798 |

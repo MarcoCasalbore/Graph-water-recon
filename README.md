@@ -66,7 +66,6 @@ Representative electric reconstructions:
 
 ![Electric medium reconstruction](docs/figures/electric_decoders/electric_medium_best_decoder_compare.png)
 
-![Electric synthetic mesh reconstruction](docs/figures/electric_decoders/electric_synth_mesh_best_decoder_overlay.png)
 
 ## Water Results Snapshot
 

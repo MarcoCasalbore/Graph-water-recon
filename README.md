@@ -1,64 +1,76 @@
-﻿# Graph Water Recon / W-DGM
+# Graph Water Recon / W-DGM
 
 Graph topology reconstruction from node coordinates and node-level time series.
 
-The project studies whether a Dynamic Graph Module (DGM) can learn a useful hidden topology while solving a forecasting task. The original benchmark is water-like: pressure and demand signals are observed at nodes, coordinates are known, and pipe connections are hidden. The same architecture is now also tested on electric-grid-like benchmarks, where voltage behaves like the smooth network variable and active load behaves like demand.
+This project studies whether a Dynamic Graph Module (DGM) can learn a useful hidden graph while solving a forecasting task. The original setting is water-like: pressure and demand are observed at nodes, coordinates are known, and pipe connections are hidden. The same pipeline is now tested on electric-grid-like benchmarks, where voltage plays the role of the smooth network variable and active load plays the role of demand.
 
-The central rule is simple: ground-truth edges are never used during training, loss construction, proxy construction, candidate selection, checkpoint selection, hyperparameter choice, decoder selection, or post-processing. Ground truth is used only after the fact for metrics and figures.
+The central protocol is strict: ground-truth edges are never used during training, loss construction, observable-prior construction, candidate selection, checkpoint selection, hyperparameter choice, decoder selection, or post-processing. Ground truth is used only after the fact for final metrics and figures.
 
-## Current Pipeline
+## Architecture Overview
 
-The current architecture has three pieces:
+```mermaid
+flowchart LR
+    A["Node inputs<br/>coordinates + time series"] --> B["Topology-sensitive benchmark<br/>short history, longer horizon"]
+    B --> C["DGM forecaster<br/>dynamic edge probabilities P_ij"]
+    A --> D["Observable topology prior<br/>geometry + domain signals"]
+    D --> E["Joint training objective<br/>forecast + topology prior"]
+    C --> E
+    E --> F["Saved DGM probabilities<br/>mean(P_ij), std(P_ij)"]
+    F --> G["GT-free static decoder<br/>sparse row-wise mutual selection"]
+    G --> H["Final reconstructed graph"]
+    H --> I["Post-hoc evaluation only<br/>F1, precision, recall, figures"]
+```
 
-1. A DGM forecaster that predicts future node variables from short histories.
-2. An observable topology prior built from coordinates and domain-observable signals.
-3. A GT-free static decoder that turns DGM edge probabilities into one final graph.
-
-For the final graph, the strongest current decoder uses the mean DGM edge probability and penalizes batch-to-batch instability:
+The current final graph decoder is simple and transparent. It uses the average edge probability produced by the DGM and penalizes edges that vary strongly across batches:
 
 ```text
 score_ij = mean(P_ij) - beta * std(P_ij)
 ```
 
-Then a sparse row-wise mutual decoder, usually with an optional geometric MST, extracts the static graph. This decoder is simple, transparent, and currently stronger than the trainable consensus learner.
+A sparse row-wise decoder then extracts a static graph, usually with mutuality and an optional geometric MST to keep the reconstruction connected. A trainable consensus learner is also implemented as a diagnostic, but the stability-aware explicit decoder is currently stronger.
 
 ## Benchmarks
 
-Tracked benchmark families:
+The repository contains two benchmark families:
 
-- Water-like synthetic networks: base, bridges, loopy, and held-out variants.
-- Electric SimBench/pandapower networks: simple, intermediate, medium, loopy, and mesh variants.
-- Electric synthetic networks: branch and mesh cases designed to be closer to water-like topology.
+| Family | Variables | Goal | Notes |
+| --- | --- | --- | --- |
+| Water-like | pressure, demand | reconstruct hidden pipe topology | original controlled setting |
+| Electric-like | voltage, active load | reconstruct hidden grid topology | SimBench/pandapower and synthetic variants |
 
-Electric datasets are generated with:
+Tracked electric datasets are stored under `data/synthetic/electric_*`. They are small controlled benchmarks and are versioned with the repository.
 
-```bash
-python scripts/electric/generate_simbench_electric.py
-python scripts/electric/generate_synthetic_electric.py
-```
+## Average Results
 
-The generated electric benchmark datasets are small enough to keep in the repository under `data/synthetic/electric_*`.
+The table below reports compact average topology/task results for the current representative sweeps. The electric averages use the stability-aware saved-probability decoder. The water average summarizes the current water DGM snapshot reported in the project docs.
 
-## Recent Electric Results
+| Domain | Benchmarks | Avg task MSE | Avg F1 | Avg precision | Avg recall | Avg Eval 0.5 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Water-like | 4 | - | 0.773 | - | - | - |
+| Electric-like | 8 | 0.467 | 0.845 | 0.888 | 0.814 | 0.764 |
+
+`Eval 0.5` is a compact post-hoc score with equal weight on task quality and topology reconstruction. It is not used for training.
+
+## Electric Results
 
 Fixed setup for the latest electric sweep:
 
 - DGM modules: `mlp + gcn`
-- task loss: Huber, target-normalized
+- task loss: Huber with target normalization
 - topology prior: complete electric observable prior
-- final score: equal weight on task quality and topology F1
+- decoder: stability-aware saved-probability decoder
 - GT usage: post-hoc metrics and figures only
 
-| Dataset | Best decoder | Task MSE | F1 | Precision | Recall | Eval 0.5 |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `electric_simple` | `mean - 2std`, row2 mutual MST | 0.412 | 0.953 | 0.953 | 0.953 | 0.831 |
-| `electric_intermediate` | mean, row2 mutual MST | 0.454 | 0.860 | 0.825 | 0.897 | 0.774 |
-| `electric_medium` | `mean - 1std`, row2 mutual MST | 0.480 | 0.949 | 0.930 | 0.969 | 0.812 |
-| `electric_loopy` | `mean - 1std`, row2 mutual MST | 0.618 | 0.800 | 0.777 | 0.825 | 0.709 |
-| `electric_mesh_simple` | `mean - 1std`, row2 mutual MST | 0.419 | 0.848 | 0.955 | 0.764 | 0.777 |
-| `electric_mesh_medium` | `mean - 2std`, row2 mutual MST | 0.511 | 0.782 | 0.881 | 0.703 | 0.722 |
-| `electric_synth_branch` | `mean - 1std`, row3 mutual no-MST | 0.468 | 0.829 | 0.927 | 0.750 | 0.755 |
-| `electric_synth_mesh` | `mean - 0.5std`, row3 mutual MST | 0.376 | 0.738 | 0.852 | 0.650 | 0.732 |
+| Dataset | Task MSE | F1 | Precision | Recall | Eval 0.5 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `electric_simple` | 0.412 | 0.953 | 0.953 | 0.953 | 0.831 |
+| `electric_intermediate` | 0.454 | 0.860 | 0.825 | 0.897 | 0.774 |
+| `electric_medium` | 0.480 | 0.949 | 0.930 | 0.969 | 0.812 |
+| `electric_loopy` | 0.618 | 0.800 | 0.777 | 0.825 | 0.709 |
+| `electric_mesh_simple` | 0.419 | 0.848 | 0.955 | 0.764 | 0.777 |
+| `electric_mesh_medium` | 0.511 | 0.782 | 0.881 | 0.703 | 0.722 |
+| `electric_synth_branch` | 0.468 | 0.829 | 0.927 | 0.750 | 0.755 |
+| `electric_synth_mesh` | 0.376 | 0.738 | 0.852 | 0.650 | 0.732 |
 
 Representative electric reconstructions:
 
@@ -66,12 +78,18 @@ Representative electric reconstructions:
 
 ![Electric medium reconstruction](docs/figures/electric_decoders/electric_medium_best_decoder_compare.png)
 
+## Water Results
 
-## Water Results Snapshot
+The water branch benchmarks remain the original controlled test bed. Current work keeps the DGM training joint; two-stage experiments are treated as diagnostics only.
 
-The water branch benchmarks remain the original controlled test bed. Current work keeps the DGM training joint, with two-stage experiments treated only as diagnostics.
+| Dataset | F1 | Notes |
+| --- | ---: | --- |
+| simple water-like graph | 0.803 | controlled simple benchmark |
+| water-branch base | 0.794 | district-like branches |
+| water-branch loopy | 0.753 | additional local loops |
+| water-branch bridges | 0.742 | longer bridge-like connections |
 
-Example water-like reconstructions:
+Representative water reconstructions:
 
 ![Water base reconstruction](docs/figures/water_base_best_graph_compare.png)
 
@@ -85,7 +103,7 @@ Example water-like reconstructions:
 .
 ├── data/synthetic/           # Tracked small synthetic benchmarks
 ├── docs/                     # Protocols, methodology notes, result summaries
-├── docs/figures/             # Lightweight summary figures for papers/slides
+├── docs/figures/             # Lightweight summary figures
 ├── scripts/diagnostics/      # Proxy tests, decoder sweeps, consensus diagnostics
 ├── scripts/electric/         # Electric benchmark generators
 ├── scripts/experiments/      # DGM training and benchmark runners
@@ -94,7 +112,7 @@ Example water-like reconstructions:
 └── src/                      # DGM training, losses, datasets, model helpers
 ```
 
-Generated training outputs, checkpoints, and large experiment sweeps are ignored by Git.
+Generated training outputs, checkpoints, virtual environments, and large experiment sweeps are ignored by Git.
 
 ## Setup
 
@@ -107,6 +125,13 @@ pip install -r requirements.txt
 PyTorch Geometric wheels may depend on your local CUDA/CPU setup. If installation fails, install the matching PyG wheels first, then rerun the requirements install.
 
 ## Typical Commands
+
+Generate electric benchmarks:
+
+```bash
+python scripts/electric/generate_simbench_electric.py
+python scripts/electric/generate_synthetic_electric.py
+```
 
 Run one electric DGM experiment:
 
@@ -172,6 +197,6 @@ Useful starting points:
 - `docs/PROXY_LANDSCAPE_DIAGNOSTIC.md`
 - `docs/PROXY_METHODOLOGY_STUDY.md`
 
-## Current Scientific Takeaway
+## Current Takeaway
 
-The reconstruction ceiling is limited by the information available from observable quantities: coordinates, node dynamics, and domain knowledge. The current electric results suggest that voltage/load dynamics contain enough topology signal to make the approach portable beyond water networks, but the final static decoder still matters a lot. The strongest current choice is the transparent stability-aware decoder rather than the trainable consensus learner.
+The reconstruction ceiling is limited by the information available from observable quantities: coordinates, node dynamics, and domain knowledge. The electric results suggest that voltage/load dynamics contain enough topology signal to make the approach portable beyond water networks. The final static decoder still matters substantially, and the strongest current choice is the transparent stability-aware decoder.

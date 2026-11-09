@@ -65,3 +65,7 @@ python scripts/validation/run_corrected_metric_sweeps.py --help
 ```
 
 The main campaign fixes graph/signal seeds 211/1211 and training seeds 42–46; sweeps use 42–44. Output remains in `results_section_v/` for compatibility. Supplementary analyzers expect those artifacts and should not be run on an empty clone before generating the corresponding campaigns. Some historical summaries called a scaled/Huber objective MSE; use aligned saved predictions for actual MSE/MAE comparisons. Do not combine these numbers with the main protocol's normalized MSE.
+
+## Paper-specific sources
+
+See [PAPER_REPRODUCTION.md](PAPER_REPRODUCTION.md) for alpha, candidate-size/k, temporal and supplementary-network producers. Table exports require `tabulate`, declared in `requirements-benchmarks.txt`. Drawing notebooks are saved without execution outputs and write into isolated per-notebook output directories.

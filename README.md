@@ -74,10 +74,14 @@ scripts/
 tests/                    self-contained protocol and training checks
 data/synthetic/           small, previously tracked synthetic examples
 docs/                     setup, dataset contracts, status and historical methods
-legacy/, notebooks/       historical placeholders
+notebooks/paper_figures/  portable publication layout sources
 ```
 
 New downloaded datasets, simulation outputs, checkpoints, reports and figures are excluded from Git. The recent benchmarks are regenerated from their upstream sources, not silently bundled. [Dataset acquisition and formats](docs/DATASETS.md) covers Net3, Fossolo, Pescara, Iowa feeder B, SimBench and the newer homogeneous synthetic variants.
+
+## Paper experiments and figure sources
+
+The [paper reproduction map](docs/PAPER_REPRODUCTION.md) identifies the maintained synthetic ablations, Net3/Iowa experiments and eight supplementary layouts. Edited figure sources are versioned under `notebooks/paper_figures/`; notebook exports go to `outputs/paper_figures/<name>/`, while the editable deck and manuscript remain local in `paper_artifacts/publication/`. Older unrelated experiment entry points have been removed while their shared runtime helpers remain.
 
 ## Before running a scientific campaign
 

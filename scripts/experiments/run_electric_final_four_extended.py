@@ -729,7 +729,7 @@ def main() -> None:
         if not topology_path.exists():
             raise FileNotFoundError(
                 f"Missing fixed topology {topology_path}. Run "
-                "scripts/visualization/generate_electric_topologies_section_vi.py first."
+                "the maintained topology generator described in docs/PAPER_REPRODUCTION.md first."
             )
         for seed in (TUNING_SEED, *FINAL_SEEDS):
             prepare_dataset(

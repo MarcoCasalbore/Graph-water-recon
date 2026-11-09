@@ -16,3 +16,5 @@
 Run scripts from the repository root. Keep source under `src/` or `scripts/`, configuration under `configs/`, generated files under `outputs/` or the historical ignored experiment directories. The synthetic validation sources were extracted from those output directories; their output paths remain stable to preserve existing experiments.
 
 Do not route the main benchmark loader through the earlier NPZ loader: the old artifact combines reference edges and observations. The new contract physically separates them. Earlier PV, solar, wind and traffic code remains experimental; its optional TSL/Lightning dependencies and external datasets are not part of the validated entry point.
+
+Publication drawing sources now live under `notebooks/paper_figures/`. Generated output paths remain stable for the retained experiments. See [the paper map](PAPER_REPRODUCTION.md) for the pruned source scope; removed experiment families are not alternate supported starting points.

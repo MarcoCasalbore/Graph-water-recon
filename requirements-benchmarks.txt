@@ -9,3 +9,4 @@ wntr==1.4.0
 pandapower==3.4.0
 simbench==1.6.2
 opendssdirect.py==0.9.4
+tabulate==0.9.0

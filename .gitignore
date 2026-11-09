@@ -81,3 +81,6 @@ lightning_logs/
 *:Zone.Identifier
 Thumbs.db
 .DS_Store
+
+# Local publication exports; figure sources are versioned under notebooks/
+/paper_artifacts/

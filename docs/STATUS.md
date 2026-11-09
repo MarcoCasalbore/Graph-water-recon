@@ -43,3 +43,7 @@ Candidate sparsity does not make the implementation fully sparse: dense pair mat
 ## Verification boundary
 
 Local checks passed: ten self-contained tests; full fixture campaign with artifact/table exports on CPU; electric fixture on CUDA; one-epoch Net3 CPU and Iowa CUDA campaigns; fixed-graph self-check; homogeneous relational generation; source compilation and dependency consistency. These are software checks, not repeated final scientific campaigns. The [clean-install Linux and Windows CPU CI](https://github.com/MarcoCasalbore/Graph-water-recon/actions/runs/42620227193) also passed on the cleanup code commit. The local reference environment is Linux/WSL with NVIDIA and CPU execution. The full historical sweeps, native Windows simulators/GPU, AMD/ROCm and all optional PV/solar/traffic modes are not certified by passing the smoke tests. Direct dependency pins are not a full lockfile; exact historical results also need the original source data and compatible simulator/backend versions.
+
+## Paper-scope cleanup
+
+The local workspace was narrowed to the paper experiment families after a second source/input review. The drawing notebooks previously available only locally are now versioned without saved outputs, and the optional pandas table dependency is explicitly declared. Final experiment files remain local; the cleanup did not rerun or certify manuscript numbers. See [PAPER_REPRODUCTION.md](PAPER_REPRODUCTION.md).

@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "dataset": "iowa240_feeder_b",
+  "domain": "electric",
+  "provenance": "real utility grid, unmodified; public Iowa 240-bus time-series test system",
+  "source_url": "https://wzy.ece.iastate.edu/testsystem.html",
+  "paper_doi": "10.1109/NAPS46351.2019.8999982",
+  "license": "Publicly shared with utility permission; the source page does not state a standard open-data licence.",
+  "subnetwork_rule": "pre-defined operational feeder B, primary buses bus2001..bus2060",
+  "boundary_condition": "full three-feeder OpenDSS solve; upstream breaker CB_201 and common source excluded from reconstructed internal graph",
+  "observation_file": "data.npz",
+  "variables": [
+    "pressure",
+    "demand"
+  ],
+  "physical_variable_names": [
+    "voltage_magnitude_pu",
+    "p_net_mw"
+  ],
+  "node_ids": [
+    "bus2001",
+    "bus2002",
+    "bus2003",
+    "bus2004",
+    "bus2005",
+    "bus2006",
+    "bus2007",
+    "bus2008",
+    "bus2009",
+    "bus2010",
+    "bus2011",
+    "bus2012",
+    "bus2013",
+    "bus2014",
+    "bus2015",
+    "bus2016",
+    "bus2017",
+    "bus2018",
+    "bus2019",
+    "bus2020",
+    "bus2021",
+    "bus2022",
+    "bus2023",
+    "bus2024",
+    "bus2025",
+    "bus2026",
+    "bus2027",
+    "bus2028",
+    "bus2029",
+    "bus2030",
+    "bus2031",
+    "bus2032",
+    "bus2033",
+    "bus2034",
+    "bus2035",
+    "bus2036",
+    "bus2037",
+    "bus2038",
+    "bus2039",
+    "bus2040",
+    "bus2041",
+    "bus2042",
+    "bus2043",
+    "bus2044",
+    "bus2045",
+    "bus2046",
+    "bus2047",
+    "bus2048",
+    "bus2049",
+    "bus2050",
+    "bus2051",
+    "bus2052",
+    "bus2053",
+    "bus2054",
+    "bus2055",
+    "bus2056",
+    "bus2057",
+    "bus2058",
+    "bus2059",
+    "bus2060"
+  ],
+  "num_nodes": 60,
+  "num_samples": 8760,
+  "step_seconds": 3600,
+  "splits": {
+    "train": [
+      0,
+      6570
+    ],
+    "val": [
+      6570,
+      7446
+    ],
+    "test": [
+      7446,
+      8760
+    ]
+  },
+  "window": {
+    "lags": 6,
+    "forecast_horizon": 12,
+    "cross_boundary_windows": false
+  },
+  "normalization_fit_split": "train",
+  "candidate_statistics_fit_split": "train",
+  "source_files": {
+    "master_dss_sha256": "3efd067c70262c46759405b1f1c5fbf5b0a508a421dd96bddde25ff8b01fa919",
+    "feeder_a_p_sha256": "8a2b1812149de5957abe9977f3537a8592883416fc34a1f848a7719bae501ed3",
+    "feeder_a_q_sha256": "428fa3741f61b81241aaf9ae75efa4c3cfcb209b3d34f3f3493d6185bcdafca1",
+    "feeder_b_p_sha256": "64098aa0a001eb400b1059323849b48c1d91c732725e74a2cd8443420f78284a",
+    "feeder_b_q_sha256": "9b2dcc89be0d123f1af9cc026ae02978cfecc0cc549e6149fb2d285ee3c44e2e",
+    "feeder_c_p_sha256": "e1a978cb03ce5699162be916088d6a1e0ee7804f48250f32a4bf6d7219ba5f90",
+    "feeder_c_q_sha256": "d08592cec80d032ce6f91c95b2f122e9b2aaa2f315dfdb4605e3093d576b9c5d"
+  },
+  "simulation": {
+    "engine": "OpenDSSDirect",
+    "samples": 8760,
+    "nonconverged": 0,
+    "elapsed_seconds": 6.579652702999738
+  },
+  "reference_topology_exposed": false,
+  "artifact_sha256": "fcb187d2454a862a1fe6a886d3e7e6fc70aa6f197e74cc805afa149ac2920f71"
+}

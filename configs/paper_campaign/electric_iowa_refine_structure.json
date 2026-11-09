@@ -1,0 +1,19 @@
+{
+  "base": {
+    "learning_rate": 0.001,
+    "embedding_dim": 4,
+    "hidden_dim": 32,
+    "message_layers": 2,
+    "batch_size": 16,
+    "epochs": 60,
+    "coordinate_dim": 4,
+    "electric_prior_ridge": 0.5,
+    "decoder_row_k": 2,
+    "consensus_target_degree": 4.0
+  },
+  "grid": {
+    "alpha": [0.9, 0.95, 0.975],
+    "candidate_size": [3, 4, 5],
+    "k": [2, 3]
+  }
+}

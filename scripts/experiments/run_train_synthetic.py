@@ -1,4 +1,4 @@
-﻿"""Train DGM on the controlled synthetic water-like benchmark."""
+"""Train DGM on the controlled synthetic water-like benchmark."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-os.environ["TORCH_CUDA_ARCH_LIST"] = "9.0+PTX"
 
 from src.config import Parameters
 from src.train_dgm import _flatten_for_dgm, _reshape_ctown_epanet_batch
@@ -338,6 +337,7 @@ def configure_run(args: argparse.Namespace) -> Parameters:
     params.run_name = args.run_name
     params.export_dir = str(args.out_dir)
     params.loss_plot_path = str(args.out_dir / "loss_curve.png")
+    params.diagnostic_graph_metrics = bool(args.diagnostic_graph_metrics)
 
     params.graph_detach_input = False
     params.model = f"dgm_{args.ffun}_{args.gfun}"
@@ -386,6 +386,7 @@ def configure_run(args: argparse.Namespace) -> Parameters:
     node_xy = np.load(params.data_npz)["node_xy"].astype(np.float32)
     params.node_xy = node_xy[0] if node_xy.ndim == 3 else node_xy
     params.lambda_soft_pseudo_edge = args.lambda_soft_pseudo_edge
+    params.topology_loss_normalization = args.topology_loss_normalization
     params.pseudo_geo_tau = args.pseudo_geo_tau
     params.pseudo_temporal_weight = args.pseudo_temporal_weight
     params.pseudo_score_mode = args.pseudo_score_mode
@@ -825,6 +826,11 @@ def main() -> None:
         default=True,
     )
     parser.add_argument("--lambda_soft_pseudo_edge", type=float, default=0.0)
+    parser.add_argument(
+        "--topology_loss_normalization",
+        choices=["none", "uniform_baseline"],
+        default="none",
+    )
     parser.add_argument("--pseudo_geo_tau", type=float, default=1.0)
     parser.add_argument("--pseudo_temporal_weight", type=float, default=0.5)
     parser.add_argument(
@@ -894,6 +900,7 @@ def main() -> None:
     parser.add_argument("--candidate_k", type=int, default=6)
     parser.add_argument("--candidate_signal_k", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--diagnostic_graph_metrics", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -936,6 +943,7 @@ def main() -> None:
         f"trainable={params.coordinate_embedding_trainable}"
     )
     print(f"lambda_soft_pseudo_edge: {params.lambda_soft_pseudo_edge}")
+    print(f"topology_loss_normalization: {params.topology_loss_normalization}")
     print(f"pseudo_edge_target: mode={params.pseudo_score_mode}, static_target={params.pseudo_use_static_target}, geo_tau={params.pseudo_geo_tau}, temporal_weight={params.pseudo_temporal_weight}, candidate_k={params.pseudo_candidate_k}, topk={params.pseudo_topk}, include_mst={params.pseudo_include_mst}, max_lag={params.pseudo_max_lag}, partial_ridge={params.pseudo_partial_ridge}")
     print(f"select_best_by   : {params.select_best_by}")
     print(f"initial edge_index: geometry proxy from initial_edge_index")
@@ -1024,6 +1032,7 @@ def main() -> None:
                 geo_tau=args.pseudo_geo_tau,
                 include_mst=args.pseudo_include_mst,
             )
+
         else:
             candidate_mask = build_knn_candidate_mask(npz["node_xy"].astype(np.float32), args.candidate_k)
         assigned = 0
@@ -1034,6 +1043,32 @@ def main() -> None:
         print(f"[INFO] Assigned {args.candidate_mode} candidate mask to {assigned} DGM layer(s), geo_k={args.candidate_k}, signal_k={args.candidate_signal_k}.")
 
     train_and_test(model, train_l, val_l, test_l, params)
+
+    # Post-hoc export only: never used for training or model selection.
+    torch.save(model.state_dict(), args.out_dir / "model_state_selected.pt")
+    model.eval()
+    device = next(model.parameters()).device
+    y_true_parts, y_pred_parts = [], []
+    with torch.no_grad():
+        for prediction_batch in test_l:
+            edge_index = prediction_batch.edge_index.to(device)
+            edge_weight = prediction_batch.edge_attr.to(device) if prediction_batch.edge_attr is not None else None
+            x_pred, y_true, _ = _reshape_ctown_epanet_batch(prediction_batch, params, device)
+            x_pred, y_true = _flatten_for_dgm(x_pred, y_true)
+            y_pred, _ = model(x_pred, edge_index, edge_weight)
+            batch_samples = y_true.shape[0] // int(params.num_nodes)
+            prediction_shape = (
+                batch_samples, int(params.num_nodes),
+                int(params.prediction_window), int(params.output_features),
+            )
+            y_true_parts.append(y_true.reshape(prediction_shape).detach().cpu().numpy())
+            y_pred_parts.append(y_pred.reshape(prediction_shape).detach().cpu().numpy())
+    np.savez_compressed(
+        args.out_dir / "test_predictions.npz",
+        y_true=np.concatenate(y_true_parts, axis=0),
+        y_pred=np.concatenate(y_pred_parts, axis=0),
+        domain=np.asarray("train_standardized"),
+    )
 
     consensus_edges = export_consensus_graph(
         model=model,

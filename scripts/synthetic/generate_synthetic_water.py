@@ -471,7 +471,11 @@ def make_splits(timesteps: int, train_ratio: float = 0.7, val_ratio: float = 0.1
 
 
 def generate(args: argparse.Namespace) -> None:
-    rng = np.random.default_rng(args.seed)
+    graph_seed = int(args.seed if args.graph_seed is None else args.graph_seed)
+    signal_seed = int(args.seed if args.signal_seed is None else args.signal_seed)
+    rng_graph = np.random.default_rng(graph_seed)
+    rng_signal = np.random.default_rng(signal_seed)
+    rng = rng_graph
     out_dir = Path(args.out_dir)
     if not out_dir.is_absolute():
         out_dir = PROJECT_ROOT / out_dir
@@ -536,6 +540,7 @@ def generate(args: argparse.Namespace) -> None:
 
     initial_edges = build_knn_edges(node_xy, args.initial_knn)
 
+    rng = rng_signal
     pressure, demand = simulate_timeseries(
         xy=node_xy,
         edges=gt_edges,
@@ -562,7 +567,9 @@ def generate(args: argparse.Namespace) -> None:
 
     meta = {
         "name": "synthetic_water",
-        "seed": args.seed,
+        "seed": graph_seed,
+        "graph_seed": graph_seed,
+        "signal_seed": signal_seed,
         "node_ids": [f"N{i:03d}" for i in range(args.num_nodes)],
         "num_nodes": args.num_nodes,
         "num_gt_undirected_edges": len(gt_edges),
@@ -625,6 +632,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pressure_smooth_tau", type=float, default=1.8)
     parser.add_argument("--initial_knn", type=int, default=3)
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument(
+        "--graph_seed", type=int, default=None,
+        help="Graph/coordinate RNG seed; defaults to --seed for backward compatibility.",
+    )
+    parser.add_argument(
+        "--signal_seed", type=int, default=None,
+        help="Signal-simulation RNG seed; defaults to --seed for backward compatibility.",
+    )
     return parser.parse_args()
 
 

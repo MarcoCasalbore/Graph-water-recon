@@ -1,88 +1,18 @@
-# Project Structure
+# Code map
 
-The project is being moved from a water-network-specific prototype toward a
-generic graph reconstruction framework with water networks as a concrete
-application.
+| Area | Entry point / owner | Purpose |
+| --- | --- | --- |
+| Main pipeline | `src/paper_protocol.py` | Load observations; fit train-only statistics; learn dynamic graph and forecast; consolidate and decode |
+| Campaign | `scripts/benchmarks/run_paper_campaign.py` | Expand grids, resume trials, select by mean validation joint objective, optionally evaluate reference topology |
+| Main data adapters | `scripts/benchmarks/generate_*benchmark.py`, `generate_iowa240_feeder.py` | Separate observations and evaluation-only reference edges |
+| Baselines | `scripts/benchmarks/run_fixed_graph_baselines.py` | GT-free fixed graphs and forecasting controls |
+| Artifact exports | `scripts/benchmarks/assemble_final_artifacts.py`, `build_final_table.py` | Local summaries, figures and tables after evaluation |
+| Consensus implementation | `scripts/diagnostics/train_consensus_learner.py` | Shared NumPy/PyTorch learner and decoder imported by the main pipeline |
+| Earlier synthetic training | `src/train_dgm.py`, `src/model/dgm.py`, `src/dataset/dataset_epanet.py` | PyG research implementation; separate scientific settings |
+| Synthetic validation | `scripts/validation/` | Section V data generation, controlled campaigns, baselines and corrected metrics |
+| Supplementary sweeps | `scripts/validation_supplement/` | Alpha and neighbourhood-size analyses using local campaign artifacts |
+| Tests | `tests/test_paper_protocol.py` | Temporary deterministic fixtures; no external dataset dependency |
 
-## Conceptual Boundaries
+Run scripts from the repository root. Keep source under `src/` or `scripts/`, configuration under `configs/`, generated files under `outputs/` or the historical ignored experiment directories. The synthetic validation sources were extracted from those output directories; their output paths remain stable to preserve existing experiments.
 
-### Generic Core
-
-Code in the generic core should not depend on EPANET, WNTR, pressure, demand,
-or hydraulic assumptions.
-
-Expected responsibilities:
-
-- graph/topology learning modules;
-- temporal forecasting backbones;
-- synthetic graph and time-series benchmarks;
-- topology recovery metrics;
-- training loops and reusable losses.
-
-### Water Application
-
-Water-specific code is kept under `scripts/water` and `src/dataset` for now.
-It may depend on EPANET/WNTR concepts such as `.inp` files, pressure, demand,
-and hydraulic network ground truth.
-
-Expected responsibilities:
-
-- generate time series from EPANET/WNTR;
-- load pressure/demand datasets;
-- compare learned graphs with EPANET ground truth;
-- run water-specific experiments.
-
-## Current Layout
-
-```text
-scripts/water/
-  epanet_data_ts_creator.py
-  compare_graphs_epanet.py
-  compare_consensus_graphs_epanet_configurable.py
-  node_pressure_test.py
-
-scripts/experiments/
-  run_train.py
-  run_grid_search.py
-  run_grid_search_water_fixed.py
-  rank_grid_results_topology.py
-  run_inference.py
-  run_test.py
-
-scripts/diagnostics/
-  inspect_batch_edge_stability.py
-
-scripts/visualization/
-  print_graph.py
-
-src/dataset/
-  dataset.py
-  dataset_Solar.py
-  dataset_epanet.py
-
-src/model/
-  dgm.py
-  gcn1d.py
-  gcn1d_new.py
-  gconvrnn.py
-  dcrnn.py
-  export_graph_stats.py
-```
-
-## Next Refactoring Pass
-
-The high-value cleanup target is to split `src/train_dgm.py` into:
-
-- `src/training/loops.py`
-- `src/training/losses.py`
-- `src/evaluation/graph_metrics.py`
-- `src/evaluation/export_graph.py`
-
-Then split `src/model/dgm.py` into:
-
-- `src/model/dgm.py` for the actual DGM module;
-- `src/model/graph_sampling.py` for edge sampling / KNN / candidate masks;
-- `src/model/backbones.py` for temporal and graph backbones.
-
-This should be done only after a small smoke test is available, so that the
-cleanup remains behavior-preserving.
+Do not route the main benchmark loader through the earlier NPZ loader: the old artifact combines reference edges and observations. The new contract physically separates them. Earlier PV, solar, wind and traffic code remains experimental; its optional TSL/Lightning dependencies and external datasets are not part of the validated entry point.

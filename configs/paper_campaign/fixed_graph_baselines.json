@@ -1,0 +1,21 @@
+{
+  "seeds": [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119],
+  "datasets": {
+    "water_net3": {
+      "observation_dir": "data/benchmarks/water/net3/observations",
+      "evaluation_dir": "data/benchmarks/water/net3/evaluation_only",
+      "model_config": "configs/paper_campaign/water_net3_final.json"
+    },
+    "electric_iowa": {
+      "observation_dir": "data/benchmarks/electric/iowa240_feeder_b/observations",
+      "evaluation_dir": "data/benchmarks/electric/iowa240_feeder_b/evaluation_only",
+      "model_config": "configs/paper_campaign/electric_iowa_final.json"
+    }
+  },
+  "methods": {
+    "euclidean_mst": {},
+    "geometric_knn_mutual": {"k": 3, "symmetry": "mutual"},
+    "geometric_knn_union": {"k": 2, "symmetry": "union"},
+    "correlation_graph": {"k": 3, "symmetry": "union"}
+  }
+}

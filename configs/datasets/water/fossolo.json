@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "dataset": "fossolo",
+  "domain": "water",
+  "provenance": "real-derived reduced Fossolo neighbourhood, Bologna, Italy; Bragalli et al.",
+  "source_url": "https://uknowledge.uky.edu/wdst_international/3/",
+  "source_revision": "WaterBenchmarkHub 2b92f79e41e37b07116df458d67c25d43f7bf9d2",
+  "license": "CC BY-NC 4.0",
+  "observation_file": "data.npz",
+  "variables": [
+    "pressure",
+    "demand"
+  ],
+  "node_ids": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "15",
+    "16",
+    "17",
+    "18",
+    "19",
+    "20",
+    "21",
+    "22",
+    "23",
+    "24",
+    "25",
+    "26",
+    "27",
+    "28",
+    "29",
+    "30",
+    "31",
+    "32",
+    "33",
+    "34",
+    "35",
+    "36",
+    "37"
+  ],
+  "num_nodes": 37,
+  "num_samples": 2880,
+  "step_seconds": 900,
+  "splits": {
+    "train": [
+      0,
+      2160
+    ],
+    "val": [
+      2160,
+      2448
+    ],
+    "test": [
+      2448,
+      2880
+    ]
+  },
+  "window": {
+    "lags": 6,
+    "forecast_horizon": 12,
+    "cross_boundary_windows": false
+  },
+  "normalization_fit_split": "train",
+  "candidate_statistics_fit_split": "train",
+  "source_sha256": "17e8354c7cd4fc28bcc537c582c474db64c48a2f78cac66c088836f57950d0e6",
+  "simulation_ready_sha256": "64f65234e470a74aa66674a20cfa5f0363d45b456134afe1110dc0a4ee867f6a",
+  "simulation": {
+    "engine": "epanet",
+    "seed": 20260831,
+    "demand_pattern_model": "documented diurnal + weekday/weekend + smoothed log-noise",
+    "pattern_count": 36
+  },
+  "non_topological_repairs": {
+    "removed_nul_bytes": 0,
+    "dropped_orphan_coordinate_ids": [],
+    "disabled_default_pattern_lines": [
+      "Pattern            \ttime"
+    ],
+    "topology_changed": false
+  },
+  "reference_topology_exposed": false,
+  "artifact_sha256": "06d31c80b2aea2f79eaadec5b79a761bc09c148c3ddad77ff86c659d1d626c63"
+}

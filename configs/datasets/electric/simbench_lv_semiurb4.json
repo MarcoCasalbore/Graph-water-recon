@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "dataset": "simbench_lv_semiurb4",
+  "domain": "electric",
+  "provenance": "SimBench representative synthetic benchmark; unmodified topology",
+  "simbench_code": "1-LV-semiurb4--0-sw",
+  "observation_file": "data.npz",
+  "variables": [
+    "pressure",
+    "demand"
+  ],
+  "physical_variable_names": [
+    "voltage_magnitude_pu",
+    "p_net_mw"
+  ],
+  "node_ids": [
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "15",
+    "16",
+    "17",
+    "18",
+    "19",
+    "20",
+    "21",
+    "22",
+    "23",
+    "24",
+    "25",
+    "26",
+    "27",
+    "28",
+    "29",
+    "30",
+    "31",
+    "32",
+    "33",
+    "34",
+    "35",
+    "36",
+    "37",
+    "38",
+    "39",
+    "40",
+    "41",
+    "42",
+    "129"
+  ],
+  "num_nodes": 44,
+  "num_samples": 2880,
+  "step_seconds": 900,
+  "splits": {
+    "train": [
+      0,
+      2160
+    ],
+    "val": [
+      2160,
+      2448
+    ],
+    "test": [
+      2448,
+      2880
+    ]
+  },
+  "window": {
+    "lags": 6,
+    "forecast_horizon": 12,
+    "cross_boundary_windows": false
+  },
+  "normalization_fit_split": "train",
+  "candidate_statistics_fit_split": "train",
+  "simulation": {
+    "engine": "pandapower",
+    "profile_start": 0,
+    "profile_stride": 1,
+    "converged_samples": 2880
+  },
+  "reference_topology_exposed": false,
+  "artifact_sha256": "6bd7ccf4a21482c0a47594b57b7ed4eeba9cf9fcdf196cc3bb63731cff71efae"
+}

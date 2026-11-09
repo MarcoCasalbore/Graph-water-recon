@@ -184,7 +184,12 @@ def _compute_soft_topology_loss(model, batch, device, hparams, x_flat=None):
         probs = probs / (probs.sum(dim=1, keepdim=True) + 1e-12)
 
         if pseudo_target is not None:
-            pseudo_edge_terms.append(-(pseudo_target * torch.log(probs + 1e-12)).sum(dim=1).mean())
+            row_loss = -(pseudo_target * torch.log(probs + 1e-12)).sum(dim=1)
+            if str(getattr(hparams, "topology_loss_normalization", "none")) == "uniform_baseline":
+                eligible = torch.isfinite(logits) & ~eye
+                uniform_loss = torch.log(eligible.sum(dim=1).clamp_min(2).to(row_loss.dtype))
+                row_loss = row_loss / uniform_loss
+            pseudo_edge_terms.append(row_loss.mean())
 
     if not pseudo_edge_terms:
         zero = torch.tensor(0.0, device=device)
@@ -1466,6 +1471,11 @@ def train_one_epoch(model, dataloader, optimizer, device, hparams):
     running_stability = 0.0
     running_topology = 0.0
     running_soft_pseudo_edge = 0.0
+    running_total_loss = 0.0
+    running_weighted_forecast = 0.0
+    running_weighted_graph = 0.0
+    running_weighted_topology = 0.0
+    running_weighted_stability = 0.0
     running_pressure_mse = 0.0
     running_demand_mse = 0.0
     n_batches = 0
@@ -1530,18 +1540,14 @@ def train_one_epoch(model, dataloader, optimizer, device, hparams):
 
         if use_complementary_loss:
             alpha = max(0.0, min(1.0, alpha_forecast))
-            loss_total = (
-                alpha * (loss_forecasting + lam_graph * graph_loss)
-                + (1.0 - alpha) * topology_loss
-                + stability_term
-            )
+            weighted_forecast = alpha * loss_forecasting
+            weighted_graph = alpha * lam_graph * graph_loss
+            weighted_topology = (1.0 - alpha) * topology_loss
         else:
-            loss_total = (
-                loss_forecasting
-                + lam_graph * graph_loss
-                + topology_loss
-                + stability_term
-            )
+            weighted_forecast = loss_forecasting
+            weighted_graph = lam_graph * graph_loss
+            weighted_topology = topology_loss
+        loss_total = weighted_forecast + weighted_graph + weighted_topology + stability_term
 
         loss_total.backward()
         optimizer.step()
@@ -1555,6 +1561,11 @@ def train_one_epoch(model, dataloader, optimizer, device, hparams):
         running_stability += float(loss_stability.detach().item())
         running_topology += float(topology_loss.detach().item())
         running_soft_pseudo_edge += topology_debug["soft_pseudo_edge"]
+        running_total_loss += float(loss_total.detach().item())
+        running_weighted_forecast += float(weighted_forecast.detach().item())
+        running_weighted_graph += float(weighted_graph.detach().item())
+        running_weighted_topology += float(weighted_topology.detach().item())
+        running_weighted_stability += float(stability_term.detach().item())
         n_batches += 1
 
         all_y_true.append(y.detach().cpu().numpy())
@@ -1586,6 +1597,11 @@ def train_one_epoch(model, dataloader, optimizer, device, hparams):
         "pressure_mse": avg_pressure_mse,
         "demand_mse": avg_demand_mse,
         "alpha_forecast": alpha_forecast,
+        "total_loss": running_total_loss / max(1, n_batches),
+        "weighted_forecast_term": running_weighted_forecast / max(1, n_batches),
+        "weighted_graph_term": running_weighted_graph / max(1, n_batches),
+        "weighted_topology_term": running_weighted_topology / max(1, n_batches),
+        "weighted_stability_term": running_weighted_stability / max(1, n_batches),
     }
     return stats
 
@@ -1777,6 +1793,25 @@ def _export_learned_graph_artifacts(learned_edges_pt: str, meta_json: str, data_
     print(f"[INFO] Exported: {stats_path}")
 
 
+def _diagnostic_current_graph_f1(model, hparams):
+    """Post-hoc current-batch graph F1; never used by optimization or selection."""
+    if not bool(getattr(hparams, "diagnostic_graph_metrics", False)):
+        return None
+    if not hasattr(model, "edges") or model.edges is None:
+        return None
+    data = np.load(str(hparams.data_npz))
+    n = int(hparams.num_nodes)
+    reference = {(min(int(u), int(v)), max(int(u), int(v)))
+                 for u, v in data["edge_index"].T if int(u) != int(v)}
+    value = model.edges.detach().cpu().numpy()
+    predicted = {(min(int(u) % n, int(v) % n), max(int(u) % n, int(v) % n))
+                 for u, v in value.T if int(u) % n != int(v) % n}
+    tp = len(reference & predicted); fp = len(predicted - reference); fn = len(reference - predicted)
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    return 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+
+
 def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
     """
     Train + val (scheduler) + test.
@@ -1867,6 +1902,7 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
         )
 
         train_stats = train_one_epoch(model, train_loader, optimizer, device, hparams)
+        diagnostic_f1 = _diagnostic_current_graph_f1(model, hparams)
         print(
             f"Train - MSE: {train_stats['mse']:.4f} | RMSE: {train_stats['rmse']:.4f} "
             f"| MAE: {train_stats['mae']:.4f} | MAPE: {train_stats['mape']:.4f} "
@@ -1875,8 +1911,21 @@ def train_and_test_dgm(model, train_loader, val_loader, test_loader, hparams):
             f"| GraphLoss: {train_stats['graph_loss']:.4f} "
             f"| Stability: {train_stats.get('stability_loss', 0.0):.4f} "
             f"| L_Q: {train_stats.get('soft_pseudo_edge_loss', 0.0):.4f} "
-            f"| L_topology: {train_stats.get('topology_loss', 0.0):.4f}"
+            f"| L_topology: {train_stats.get('topology_loss', 0.0):.4f} "
+            f"| Total: {train_stats.get('total_loss', 0.0):.8f} "
+            f"| WTask: {train_stats.get('weighted_forecast_term', 0.0):.8f} "
+            f"| WGraph: {train_stats.get('weighted_graph_term', 0.0):.8f} "
+            f"| WTopo: {train_stats.get('weighted_topology_term', 0.0):.8f} "
+            f"| WStab: {train_stats.get('weighted_stability_term', 0.0):.8f}"
         )
+
+        if diagnostic_f1 is not None:
+            diagnostic_task_score = 1.0 / (1.0 + max(0.0, float(train_stats["mse"])))
+            diagnostic_eval0p5 = 0.5 * diagnostic_task_score + 0.5 * diagnostic_f1
+            print(
+                f"DiagnosticGraph - F1: {diagnostic_f1:.8f} | "
+                f"TaskScore: {diagnostic_task_score:.8f} | Eval0.5: {diagnostic_eval0p5:.8f}"
+            )
 
         history["epoch"].append(epoch)
         history["train_mse"].append(train_stats["mse"])

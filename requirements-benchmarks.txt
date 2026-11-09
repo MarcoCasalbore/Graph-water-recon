@@ -1,0 +1,11 @@
+-r requirements-core.txt
+h5py==3.16.0
+matplotlib==3.10.7
+networkx==3.5
+pandas==2.3.3
+scipy==1.16.3
+scikit-learn==1.7.2
+wntr==1.4.0
+pandapower==3.4.0
+simbench==1.6.2
+opendssdirect.py==0.9.4

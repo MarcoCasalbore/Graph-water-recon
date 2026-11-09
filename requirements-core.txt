@@ -1,0 +1,3 @@
+# Install the appropriate CPU/CUDA/ROCm torch wheel before this file.
+numpy==2.3.3
+torch>=2.8,<3

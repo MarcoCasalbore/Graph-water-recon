@@ -83,6 +83,10 @@ New downloaded datasets, simulation outputs, checkpoints, reports and figures ar
 
 The [paper reproduction map](docs/PAPER_REPRODUCTION.md) identifies the maintained synthetic ablations, Net3/Iowa experiments and eight supplementary layouts. Edited figure sources are versioned under `notebooks/paper_figures/`; notebook exports go to `outputs/paper_figures/<name>/`, while the editable deck and manuscript remain local in `paper_artifacts/publication/`. Older unrelated experiment entry points have been removed while their shared runtime helpers remain.
 
+## Migration
+
+Use [MIGRATION.md](docs/MIGRATION.md) to move the complete paper workspace, recreate the environment and verify/rebase transferred artifacts. Git alone contains no historical fitted results or downloaded benchmark sources.
+
 ## Before running a scientific campaign
 
 Read the [status and known limits](docs/STATUS.md), then [generate the datasets](docs/DATASETS.md) and follow the [campaign commands](docs/REPRODUCIBILITY.md). Budget for the declared seeds and epochs; the smoke test does not reproduce a scientific experiment. [Contributing](CONTRIBUTING.md) describes checks and what belongs in Git.

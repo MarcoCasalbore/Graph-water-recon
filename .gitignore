@@ -84,3 +84,6 @@ Thumbs.db
 
 # Local publication exports; figure sources are versioned under notebooks/
 /paper_artifacts/
+
+# Local transfer package metadata and archives
+/migration/

@@ -6,12 +6,14 @@ Checked on 2026-11-09. The main benchmark path uses dense PyTorch operations (`b
 | --- | --- | --- |
 | Linux / WSL2, CPU | Supported reference path | Local protocol tests and full smoke campaign |
 | Linux / WSL2, NVIDIA | Supported reference path | Local CUDA smoke; historical benchmark runs exist |
-| Windows native, CPU | Expected to work | Portable paths and standard PyTorch; CI added, local Windows runtime unavailable |
+| Windows native, CPU | Verified in GitHub CI | Clean Python 3.11 / Torch 2.8.0 CPU install, ten tests and full smoke campaign |
 | Windows native, NVIDIA | Expected to work | Install the matching official Torch wheel; not hardware-tested here |
 | Linux, AMD ROCm | Adaptable without an algorithm rewrite | Install a supported ROCm Torch build; no AMD hardware available for verification |
 | Windows / WSL2, AMD | Hardware/build dependent, unverified | Check AMD's current GPU/OS/Python matrix; do not reuse the historical NVIDIA snapshot |
 
 PyTorch ROCm intentionally exposes the GPU through `torch.cuda`; `--device cuda` is therefore correct on AMD too. `torch.version.hip` identifies a ROCm build. See [PyTorch HIP semantics](https://docs.pytorch.org/docs/stable/notes/hip.html).
+
+The [Linux and Windows CPU workflow](https://github.com/MarcoCasalbore/Graph-water-recon/actions/runs/42620227193) passed on the cleanup code commit. Native Windows simulator adapters and GPU execution were not part of that job.
 
 ## Install and verify
 

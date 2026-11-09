@@ -14,7 +14,8 @@ Audit date: 2026-11-09. Stage: **research implementation with locally completed 
 | Post-hoc evaluation | Implemented | Separate reference loader and all-pairs topology metrics |
 | Main experimental campaigns | Existing local artifacts | Net3 and Iowa result tables each contain 20 seeds; full campaigns not rerun by this cleanup |
 | Portable smoke and tests | Implemented | Self-contained fixture; CPU/GPU selection; no simulator/data download needed |
-| Native Windows and AMD validation | Outstanding | CI configured for Windows CPU; no local native Windows/AMD test hardware |
+| Native Windows CPU validation | Passed in CI | Clean install, ten tests and full smoke campaign |
+| Windows GPU and AMD validation | Outstanding | No corresponding GPU hardware verification |
 | Scientific evidence consolidation | Outstanding | Historical summaries disagree on forecasting benefits and must be reconciled from aligned predictions |
 
 ## Audit findings and changes
@@ -41,4 +42,4 @@ Candidate sparsity does not make the implementation fully sparse: dense pair mat
 
 ## Verification boundary
 
-Local checks passed: ten self-contained tests; full fixture campaign with artifact/table exports on CPU; electric fixture on CUDA; one-epoch Net3 CPU and Iowa CUDA campaigns; fixed-graph self-check; homogeneous relational generation; source compilation and dependency consistency. These are software checks, not repeated final scientific campaigns. CI is configured separately and its result must be checked after push. The local reference environment is Linux/WSL with NVIDIA and CPU execution. The full historical sweeps, native Windows, AMD/ROCm and all optional PV/solar/traffic modes are not certified by passing the smoke tests. Direct dependency pins are not a full lockfile; exact historical results also need the original source data and compatible simulator/backend versions.
+Local checks passed: ten self-contained tests; full fixture campaign with artifact/table exports on CPU; electric fixture on CUDA; one-epoch Net3 CPU and Iowa CUDA campaigns; fixed-graph self-check; homogeneous relational generation; source compilation and dependency consistency. These are software checks, not repeated final scientific campaigns. The [clean-install Linux and Windows CPU CI](https://github.com/MarcoCasalbore/Graph-water-recon/actions/runs/42620227193) also passed on the cleanup code commit. The local reference environment is Linux/WSL with NVIDIA and CPU execution. The full historical sweeps, native Windows simulators/GPU, AMD/ROCm and all optional PV/solar/traffic modes are not certified by passing the smoke tests. Direct dependency pins are not a full lockfile; exact historical results also need the original source data and compatible simulator/backend versions.

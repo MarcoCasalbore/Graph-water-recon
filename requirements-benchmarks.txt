@@ -5,6 +5,8 @@ networkx==3.5
 pandas==2.3.3
 scipy==1.16.3
 scikit-learn==1.7.2
+# WNTR imports six without declaring it in its package metadata.
+six==1.17.0
 wntr==1.4.0
 pandapower==3.4.0
 simbench==1.6.2

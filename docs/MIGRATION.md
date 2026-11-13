@@ -1,6 +1,6 @@
 # Move the paper workspace to another machine
 
-There are two separate transfers: Git contains code/configuration/drawing sources; the local migration archive contains the selected data, trained results and publication materials that Git intentionally excludes. The source WDGM environment stays on the original machine. Recreate the environment at the destination instead of copying its executables/shebangs.
+There are two separate transfers: Git contains code/configuration/drawing sources; the migration archive published in the repository's [paper workspace Release](https://github.com/MarcoCasalbore/Graph-water-recon/releases/tag/paper-workspace-2026-11-09) contains the selected data, trained results and publication materials that Git intentionally excludes. The source WDGM environment stays on the original machine. Recreate the environment at the destination instead of copying its executables/shebangs.
 
 ## Choose the target
 
@@ -10,7 +10,7 @@ The closest reference is Linux or WSL2, Python 3.11, NVIDIA with Torch 2.8.0+cu1
 
 The locally prepared package has `Graph-water-recon/` as its archive prefix. Its manifest records the exact Git commit and SHA-256 of each payload file. Use a new empty destination; do not merge it into unrelated or modified experiments.
 
-1. Copy the archive, its `.sha256` sidecar and the accompanying handoff guide to the destination using your chosen disk/SSH/file-transfer tool. Validate the archive hash before extraction (`sha256sum -c FILE.sha256` on Linux; `Get-FileHash FILE -Algorithm SHA256` in PowerShell).
+1. Download the archive and its `.sha256` sidecar from the [paper workspace Release](https://github.com/MarcoCasalbore/Graph-water-recon/releases/tag/paper-workspace-2026-11-09), following [the prepared handoff](../transfer_handoff/README.md). No source-PC access is needed. You can also copy an already verified local archive. Validate the archive hash before extraction (`sha256sum -c FILE.sha256` on Linux; `Get-FileHash FILE -Algorithm SHA256` in PowerShell).
 2. Clone the repository, check out the exact commit in the handoff and overlay the archive into that clone:
 
 ```bash
@@ -55,11 +55,12 @@ py -3.11 -m venv WDGM
 python -m pip install --upgrade pip
 ```
 
-Install one suitable Torch build, then the full paper requirements:
+Install one suitable Torch build, then the full paper requirements. The explicit `six` install below is required for the frozen archive snapshot: WNTR imports it without declaring the dependency. Current main also lists it in `requirements-benchmarks.txt`; the archived historical requirements remain unchanged for checksum verification:
 
 ```bash
 # Portable CPU starting point
 python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+python -m pip install six==1.17.0
 python -m pip install -r requirements.txt
 python -m pip check
 ```
@@ -68,6 +69,7 @@ For a compatible NVIDIA driver/GPU, the reference build is:
 
 ```bash
 python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
+python -m pip install six==1.17.0
 python -m pip install -r requirements.txt
 ```
 
@@ -102,4 +104,4 @@ Included: tracked code/config/tests/notebooks/docs; selected data and upstream m
 
 Excluded: WDGM/other environments, Git object history, credentials/editor/assistant state, caches and temporary audits. The separate Rieti/CSA field measurements and unrelated INP models under the outer `other_research/` directory are not paper dependencies and are not included. Transfer those separately if the destination will also work on that research.
 
-The prepared archive is a local transfer artifact, not a GitHub upload. The reference manuscript and upstream data retain their original rights/terms. Successful transfer verification proves file integrity, not identical scientific results or target-GPU compatibility.
+The prepared archive and checksum are GitHub Release assets of this repository. They are downloaded separately from a normal Git clone; GitHub's source ZIP alone does not include them. The reference manuscript and upstream data retain their original rights/terms. Successful transfer verification proves file integrity, not identical scientific results or target-GPU compatibility.

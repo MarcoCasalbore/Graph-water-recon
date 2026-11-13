@@ -85,7 +85,7 @@ The [paper reproduction map](docs/PAPER_REPRODUCTION.md) identifies the maintain
 
 ## Migration
 
-A [ready temporary handoff](transfer_handoff/README.md) records the prepared paper transfer, its pinned source commit and archive checksum. Remove `transfer_handoff/` and this paragraph after migration and destination checks. The approximately 791 MB archive is stored separately on the source machine and must be copied; cloning this repository does not download it.
+The [complete paper workspace archive (approximately 791 MB)](https://github.com/MarcoCasalbore/Graph-water-recon/releases/tag/paper-workspace-2026-11-09) is distributed in this repository's GitHub Release: selected datasets, historical results/checkpoints, publication materials and an integrity manifest. No access to the original PC is needed. Follow the [ready temporary handoff](transfer_handoff/README.md) to download, verify and restore it, then recreate the environment. A normal clone contains the code; download the release asset as well for the preserved paper workspace. Remove `transfer_handoff/` and this paragraph only after migration and destination checks; keep a verified archive backup.
 
 Use [MIGRATION.md](docs/MIGRATION.md) to move the complete paper workspace, recreate the environment and verify/rebase transferred artifacts. Git alone contains no historical fitted results or downloaded benchmark sources.
 

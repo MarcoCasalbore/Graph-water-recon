@@ -40,7 +40,7 @@ Additional alpha/k runners similarly require their predecessor data/runs and can
 
 ## What Git contains
 
-Code, configuration, tests, dataset provenance manifests, drawing-source notebooks and instructions are versioned. Downloaded inputs, generated observations, fitted models, metric tables, predictions, exported figures and the publication PDF/PPTX remain local and ignored. A clone therefore starts by acquiring/generating data and training; it does not contain the historical results needed to run a post-hoc analyzer immediately.
+Code, configuration, tests, dataset provenance manifests, drawing-source notebooks and instructions are versioned. Downloaded inputs, generated observations, fitted models, metric tables, predictions, exported figures and the publication PDF/PPTX remain local and ignored. For a new scientific run, acquire/generate data and train. To recover the preserved paper inputs/results without access to the source PC, download the [complete workspace Release](https://github.com/MarcoCasalbore/Graph-water-recon/releases/tag/paper-workspace-2026-11-09) and follow [MIGRATION.md](MIGRATION.md). A clone alone does not include those historical artifacts.
 
 Some hand-edited layouts embed graph snapshots. The source needed to compute and export the learned graphs is maintained separately. The cleanup preserves these snapshots and their inputs; it does not certify an exact numerical match to every manuscript cell or the agreement of every implementation setting with the prose.
 

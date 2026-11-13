@@ -40,7 +40,7 @@ Il pacchetto contiene codice/config/test/notebook, dataset e fonti selezionate, 
 5. Anteprima: python scripts/maintenance/migrate_workspace.py rebase
 6. Applicare: python scripts/maintenance/migrate_workspace.py rebase --apply
 7. Verificare: python scripts/maintenance/migrate_workspace.py verify --manifest migration/manifest-relocated.json
-8. Ricreare WDGM con Python 3.11, installare il PyTorch adeguato alla macchina, eseguire `python -m pip install six==1.17.0` e poi installare requirements.txt. Il passo `six` corregge una dipendenza non dichiarata di WNTR nello snapshot congelato; i requisiti di main includono gia la correzione. I comandi completi sono in ../docs/MIGRATION.md. Il vecchio WDGM resta funzionante sulla macchina originale.
+8. Dopo entrambe le verifiche, eseguire `git switch main` nel clone per tornare al codice mantenuto (i dati/risultati ignorati restano al loro posto). I manifest descrivono lo snapshot storico e vanno verificati prima di questo cambio. Ricreare WDGM con Python 3.11, installare il PyTorch adeguato alla macchina, eseguire `python -m pip install six==1.17.0` e poi installare requirements.txt. Il passo `six` corregge una dipendenza non dichiarata di WNTR nello snapshot congelato; i requisiti di main includono gia la correzione. I comandi completi sono in ../docs/MIGRATION.md. Il vecchio WDGM resta funzionante sulla macchina originale.
 9. Sulla nuova macchina eseguire pip check, test/smoke CPU e poi GPU esplicita se disponibile; importare i simulatori prima delle campagne. Non avviare automaticamente tutte le ablation.
 
 Configurazione più vicina alla sorgente: Linux/WSL2 + NVIDIA + Torch 2.8.0/cu129. Windows CPU è stato provato dalla CI per il percorso principale; Windows GPU e AMD/ROCm richiedono verifica sulla destinazione. Per nomi storici lunghi usare Linux/WSL o abilitare i percorsi lunghi Windows.
@@ -70,6 +70,7 @@ Prossimo passo operativo: trasferire .tar.gz, .sha256 e questo handoff, poi segu
 - Estrazione in una cartella nuova; verifica di tutti i 31.383 file prima della ricollocazione e del manifest aggiornato dopo la modifica di 2.272 JSON/CSV.
 - Ambiente Python 3.11 CPU creato da zero, installazione dei requisiti completi con `six==1.17.0`, `pip check` superato.
 - Tutti i 15 test software superati; import di WNTR, OpenDSSDirect, pandapower, SimBench e PyTorch Geometric riusciti.
+- Download completo dell'archivio pubblicato su GitHub: SHA-256 identico all'originale locale.
 - Smoke end to end sia water sia electric: generazione fixture, training di un'epoca, selezione, consenso, decodifica e valutazione riusciti.
 - Nessuna dipendenza dal WDGM originale per questi controlli dell'ambiente nuovo. Le fixture sono controlli software, non nuovi risultati scientifici del paper.
 

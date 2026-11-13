@@ -37,6 +37,14 @@ Verify the original manifest before modifying any transfer files. After relocati
 
 Logs, human-readable notes and serialized checkpoint internals are not rewritten. Historical command traces may mention the original interpreter path; use the active destination Python and current runner commands rather than replaying old shell commands verbatim.
 
+4. Once both transfer checks have passed, return a cloned checkout to the maintained source before installing dependencies and running tests:
+
+```bash
+git switch main
+```
+
+This retains the ignored transferred datasets/results and restores the current setup fixes and Windows-compatible tests. The manifest describes the historical source snapshot; after switching source, do not expect its code hashes to match current main. Finish the original/relocated manifest checks **before** this switch. The archive remains a verified immutable backup. When using the offline source snapshot without Git, install the explicit `six` dependency below; its historical Windows migration tests compare short and resolved path spellings and may fail for an equivalent 8.3 path. Use current main for the supported cross-platform tests.
+
 ## Recreate the environment
 
 Use Python 3.11. On Linux/WSL:

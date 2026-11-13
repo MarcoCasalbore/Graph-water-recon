@@ -12,7 +12,7 @@ class MigrationTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(temporary.name).resolve()
         self.old = "/old/project"
         values = {
             "final_water/config.json": json.dumps({"path": self.old + "/data/net3", "score": 0.125,

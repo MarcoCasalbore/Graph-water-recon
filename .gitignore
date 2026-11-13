@@ -31,6 +31,11 @@ AGENTS.md
 CLAUDE.md
 GEMINI.md
 *HANDOFF*
+# Temporary migration guide explicitly published for the transfer
+!/transfer_handoff/
+/transfer_handoff/*
+!/transfer_handoff/README.md
+!/transfer_handoff/*.sha256
 *CARRY_ON*
 PAPER_COMPLEMENTARY_METHOD_REPORT.txt
 # Generated experiments, checkpoints and private/source downloads
